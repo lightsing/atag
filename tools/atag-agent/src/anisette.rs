@@ -62,9 +62,7 @@ impl AnisetteProvider {
             input,
             "" | "mac-coreadi" | "local" | "portable" | "sidestore"
         ) {
-            let directory = dirs::data_local_dir()
-                .ok_or_else(ApiError::internal)?
-                .join("atag-agent");
+            let directory = crate::default_data_dir().ok_or_else(ApiError::internal)?;
             return Self::for_directory(input, &directory);
         }
         let url = Url::parse(input).map_err(|_| ApiError::invalid("Anisette 地址无效。"))?;

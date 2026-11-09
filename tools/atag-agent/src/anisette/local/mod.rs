@@ -37,6 +37,7 @@ mod portable;
 mod shim;
 
 pub type Headers = BTreeMap<String, String>;
+pub(crate) const LOCAL_WORKER_COMMAND: &str = "__anisette";
 pub(crate) const WORKER_TIMEOUT: Duration = Duration::from_secs(240);
 #[derive(Clone)]
 pub struct LocalProvider {
@@ -63,7 +64,7 @@ impl LocalProvider {
         let mut child = tokio::process::Command::new(std::env::current_exe()?)
             .arg("--data-dir")
             .arg(directory)
-            .arg("__anisette")
+            .arg(LOCAL_WORKER_COMMAND)
             .arg(if self.portable { "portable" } else { "local" })
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

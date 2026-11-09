@@ -16,6 +16,31 @@ cargo run -p atag-agent -- serve
 cargo run -p atag-agent -- serve --allow-origin https://atag-hhq.flutedbrink.chatgpt.site
 ```
 
+## 桌面托盘
+
+`atag-agent-tray` 支持 macOS 菜单栏、Windows 通知区域和 Linux 系统托盘。打开后自动启动桥接，菜单显示监听地址，可启动、停止和退出。Linux 需要桌面会话的 D-Bus 和支持 StatusNotifierItem 的托盘，例如 KDE Plasma 或启用 AppIndicator 扩展的 GNOME。托盘源码构建需要 Rust 1.90 或更新版本。
+
+```sh
+cargo build --locked -p atag-agent -p atag-agent-tray -p atag-coreadi-worker
+cargo run --locked -p atag-agent-tray -- --web-url https://atag-hhq.flutedbrink.chatgpt.site
+```
+
+`--web-url` 会显示“打开 ATAG 网页”菜单项，并将该网址的 Origin 加入白名单。托盘和 CLI 共用 `--listen`、`--allow-origin`、`--data-dir` 和 `ATAG_AGENT_DATA_DIR`。默认端口为 `18432`，已有实例占用时可用菜单重试，或用 `--listen 127.0.0.1:18433` 启动。CoreADI 的安装和初始化使用下文的 CLI 命令，运行时将 `atag-coreadi-worker` 与托盘程序放在同一目录。
+
+## 嵌入 Rust 应用
+
+托盘和 `atag-agent serve` 均调用库的 `AgentServer`。在 Tokio 运行时中绑定后，可读取实际地址并传入关闭信号。
+
+```rust
+use atag_agent::server::{AgentServer, ServerConfig};
+
+let server = AgentServer::bind(ServerConfig::default()).await?;
+println!("http://{}", server.local_addr());
+server.serve(async { let _ = tokio::signal::ctrl_c().await; }).await?;
+```
+
+若嵌入的应用需要支持 `local` 或 `portable` 来源，可像 CLI 和托盘一样解析并分发 `atag_agent::cli_support::WorkerCommand`，在运行 UI 前处理本机 Anisette 子进程。
+
 ## Anisette
 
 新登录默认使用“模拟 macOS（默认）” (`mac-coreadi`)。Agent 通过独立的 Rust 进程 `atag-coreadi-worker` 使用 Unicorn 执行 Apple 的 x86_64 CoreADI。源码构建需要 C/C++ 工具链、CMake 和 libclang。部署时将两个可执行文件放在同一目录。
@@ -77,9 +102,9 @@ agent 的失败日志仅包含失败环节、固定 Apple endpoint、HTTP 状态
 ## 检查
 
 ```sh
-cargo test -p atag-agent -p atag-coreadi-worker --locked
-cargo clippy -p atag-agent -p atag-coreadi-worker --all-targets --locked -- -D warnings
-cargo fmt --package atag-agent --package atag-coreadi-worker --check
+cargo test -p atag-agent -p atag-agent-tray -p atag-coreadi-worker --locked
+cargo clippy -p atag-agent -p atag-agent-tray -p atag-coreadi-worker --all-targets --locked -- -D warnings
+cargo fmt --package atag-agent --package atag-agent-tray --package atag-coreadi-worker --check
 node tools/atag-agent/tests/bridge-client-smoke.mjs
 ```
 

@@ -1,10 +1,11 @@
 use atag_agent::{
     anisette::{AnisetteProvider, install_mac_coreadi, local},
-    bridge::{ApiConfig, Bridge},
+    cli_support::{ListenArgs, WorkerCommand},
     error::ApiError,
+    server::{AgentServer, resolve_data_dir},
 };
 use clap::{Parser, Subcommand};
-use std::{net::SocketAddr, path::PathBuf, process::ExitCode};
+use std::{path::PathBuf, process::ExitCode};
 
 #[derive(Parser)]
 #[command(version, about = "ATAG cross-platform local agent")]
@@ -23,16 +24,10 @@ enum Command {
         #[command(subcommand)]
         command: AnisetteCommand,
     },
-    #[command(name = "__anisette", hide = true)]
-    AnisetteWorker { backend: String },
+    #[command(flatten)]
+    Worker(WorkerCommand),
     /// Serve the user-agnostic Anisette and Apple request bridge. No device/account database is opened.
-    Serve {
-        #[arg(long, default_value = "127.0.0.1:18432")]
-        listen: SocketAddr,
-        /// Exact web origin; repeat for multiple sites. Defaults to local ports 5173 and 3000.
-        #[arg(long)]
-        allow_origin: Vec<String>,
-    },
+    Serve(ListenArgs),
 }
 
 #[derive(Subcommand)]
@@ -71,12 +66,9 @@ async fn main() -> ExitCode {
 }
 
 async fn run(cli: Cli) -> Result<(), ApiError> {
-    let directory = cli
-        .data_dir
-        .or_else(|| dirs::data_local_dir().map(|d| d.join("atag-agent")))
-        .ok_or_else(|| ApiError::invalid("无法确定数据目录，请指定 --data-dir。"))?;
+    let directory = resolve_data_dir(cli.data_dir)?;
     match cli.command {
-        Command::AnisetteWorker { backend } => local::worker(&directory, &backend).await,
+        Command::Worker(command) => command.run(&directory).await,
         Command::Anisette {
             command: AnisetteCommand::InstallMacCoreadi { library, machine },
         } => {
@@ -118,35 +110,11 @@ async fn run(cli: Cli) -> Result<(), ApiError> {
             println!("Local Anisette ready ({name}). No Apple account was used.");
             Ok(())
         }
-        Command::Serve {
-            listen,
-            mut allow_origin,
-        } => {
-            if !listen.ip().is_loopback() {
-                return Err(ApiError::invalid("agent 只允许监听 loopback 地址。"));
-            }
-            if allow_origin.is_empty() {
-                allow_origin = vec![
-                    "http://localhost:5173".into(),
-                    "http://127.0.0.1:5173".into(),
-                    "http://localhost:3000".into(),
-                    "http://127.0.0.1:3000".into(),
-                ];
-            }
-            let listener = tokio::net::TcpListener::bind(listen).await?;
-            let address = listener.local_addr()?;
-            let bridge = Bridge::with_directory(
-                ApiConfig {
-                    address,
-                    allowed_origins: allow_origin,
-                },
-                directory,
-            )?;
+        Command::Serve(listen) => {
+            let server = AgentServer::bind(listen.config(Some(directory))).await?;
+            let address = server.local_addr();
             println!("ATAG v1 bridge listening on http://{address}; device/account storage: none");
-            axum::serve(listener, bridge.router())
-                .with_graceful_shutdown(shutdown_signal())
-                .await?;
-            Ok(())
+            server.serve(shutdown_signal()).await
         }
     }
 }

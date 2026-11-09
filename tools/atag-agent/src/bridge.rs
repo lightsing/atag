@@ -1,6 +1,7 @@
 //! User-agnostic v1 loopback bridge. Only transport configuration is retained.
 use crate::{
     anisette::{AnisetteProvider, ClientProfile, local::WORKER_TIMEOUT},
+    default_data_dir,
     error::ApiError,
     relay::{APPLE_AUTH_TIMEOUT, AppleRelay, AppleRequest, AppleResponse},
 };
@@ -42,9 +43,7 @@ struct AnisetteRequest {
 }
 impl Bridge {
     pub fn new(config: ApiConfig) -> Result<Self, ApiError> {
-        let directory = dirs::data_local_dir()
-            .ok_or_else(ApiError::internal)?
-            .join("atag-agent");
+        let directory = default_data_dir().ok_or_else(ApiError::internal)?;
         Self::with_directory(config, directory)
     }
     pub fn with_directory(config: ApiConfig, directory: PathBuf) -> Result<Self, ApiError> {
