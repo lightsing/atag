@@ -18,14 +18,14 @@ cargo run -p atag-agent -- serve --allow-origin https://lightsing.github.io
 
 ## 桌面托盘
 
-`atag-agent-tray` 支持 macOS 菜单栏、Windows 通知区域和 Linux 系统托盘。打开后自动启动桥接，菜单显示监听地址，可启动、停止和退出。Linux 需要桌面会话的 D-Bus 和支持 StatusNotifierItem 的托盘，例如 KDE Plasma 或启用 AppIndicator 扩展的 GNOME。托盘源码构建需要 Rust 1.90 或更新版本。
+`atag-agent-tray` 支持 macOS 菜单栏、Windows 通知区域和 Linux 系统托盘。启动后等待本机 API 就绪，再用默认浏览器打开 GitHub Pages。菜单显示 API 地址，并可再次打开网页、启动或停止 API、退出托盘。Linux 需要桌面会话的 D-Bus 和支持 StatusNotifierItem 的托盘，例如 KDE Plasma 或启用 AppIndicator 扩展的 GNOME。托盘源码构建需要 Rust 1.90 或更新版本。[ATAG 网页](https://lightsing.github.io/atag/)
 
 ```sh
 cargo build --locked -p atag-agent -p atag-agent-tray -p atag-coreadi-worker
-cargo run --locked -p atag-agent-tray -- --web-url https://atag-hhq.flutedbrink.chatgpt.site
+cargo run --locked -p atag-agent-tray
 ```
 
-`--web-url` 会显示“打开 ATAG 网页”菜单项，并将该网址的 Origin 加入白名单。托盘和 CLI 共用 `--listen`、`--allow-origin`、`--data-dir` 和 `ATAG_AGENT_DATA_DIR`。显式指定 `--listen 127.0.0.1:18433` 时只尝试该地址。运行时将 `atag-coreadi-worker` 与托盘程序放在同一目录。
+`--web-url` 可指定自托管网页，并将该网址的 Origin 加入白名单。托盘和 CLI 共用 `--listen`、`--allow-origin`、`--data-dir` 和 `ATAG_AGENT_DATA_DIR`。显式指定 `--listen 127.0.0.1:18433` 时只尝试该地址。运行时将 `atag-coreadi-worker` 与托盘程序放在同一目录。
 
 在 GitHub Actions 的 **ATAG tray packages** 工作流填入发布网页 URL，可以构建并下载
 macOS、Windows 和 Linux 压缩包。也可以在目标平台运行

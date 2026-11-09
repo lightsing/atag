@@ -15,6 +15,8 @@ use clap::Parser;
 use std::{path::PathBuf, process::ExitCode};
 use url::Url;
 
+const PAGES_URL: &str = "https://lightsing.github.io/atag/";
+
 #[derive(Parser)]
 #[command(version, about = "ATAG desktop tray", disable_help_subcommand = true)]
 struct Cli {
@@ -23,7 +25,7 @@ struct Cli {
     data_dir: Option<PathBuf>,
     #[command(flatten)]
     listen: ListenArgs,
-    /// Add this site's origin to the allowlist and show an Open ATAG Web menu item.
+    /// Open this site and allow its origin. Defaults to ATAG on GitHub Pages.
     #[arg(long, value_parser = parse_web_url)]
     web_url: Option<Url>,
     #[command(subcommand)]
@@ -52,17 +54,13 @@ fn run(cli: Cli) -> Result<()> {
     }
 
     let web_url = match cli.web_url {
-        Some(url) => Some(url),
-        None => option_env!("ATAG_TRAY_WEB_URL")
-            .map(parse_web_url)
-            .transpose()?,
+        Some(url) => url,
+        None => parse_web_url(option_env!("ATAG_TRAY_WEB_URL").unwrap_or(PAGES_URL))?,
     };
     let mut config = cli.listen.config(cli.data_dir);
-    if let Some(url) = &web_url {
-        let origin = url.origin().ascii_serialization();
-        if !config.allowed_origins.contains(&origin) {
-            config.allowed_origins.push(origin);
-        }
+    let origin = web_url.origin().ascii_serialization();
+    if !config.allowed_origins.contains(&origin) {
+        config.allowed_origins.push(origin);
     }
     tray::run(config, web_url)
 }

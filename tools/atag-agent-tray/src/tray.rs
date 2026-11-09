@@ -35,7 +35,8 @@ struct Tray {
     start_item: MenuItem,
     stop_item: MenuItem,
     config: ServerConfig,
-    web_url: Option<Url>,
+    web_url: Url,
+    web_opened: bool,
     dispatch: Dispatch,
     status: Status,
     shutdown: Option<oneshot::Sender<()>>,
@@ -43,7 +44,7 @@ struct Tray {
 }
 
 impl Tray {
-    fn new(config: ServerConfig, web_url: Option<Url>, dispatch: Dispatch) -> Result<Self> {
+    fn new(config: ServerConfig, web_url: Url, dispatch: Dispatch) -> Result<Self> {
         let menu = Menu::new();
         let status_item = MenuItem::new("ATAG Agent · 已停止", false, None);
         let start_item = MenuItem::with_id(START, "启动 Agent", true, None);
@@ -54,10 +55,8 @@ impl Tray {
             &start_item,
             &stop_item,
         ])?;
-        if web_url.is_some() {
-            menu.append(&MenuItem::with_id(OPEN_WEB, "打开 ATAG 网页", true, None))?;
-        }
         menu.append_items(&[
+            &MenuItem::with_id(OPEN_WEB, "打开 ATAG 网页", true, None),
             &PredefinedMenuItem::separator(),
             &MenuItem::with_id(QUIT, "退出", true, None),
         ])?;
@@ -88,6 +87,7 @@ impl Tray {
             stop_item,
             config,
             web_url,
+            web_opened: false,
             dispatch,
             status: Status::Stopped,
             shutdown: None,
@@ -135,7 +135,7 @@ impl Tray {
         let label = match &self.status {
             Status::Stopped => "ATAG Agent · 已停止".into(),
             Status::Starting => "ATAG Agent · 正在启动…".into(),
-            Status::Running(address) => format!("ATAG Agent · http://{address}"),
+            Status::Running(address) => format!("ATAG Agent API · http://{address}"),
             Status::Stopping => "ATAG Agent · 正在停止…".into(),
             Status::Failed(error) => format!("ATAG Agent · {error}"),
         };
@@ -145,19 +145,20 @@ impl Tray {
         self.stop_item.set_enabled(self.shutdown.is_some());
     }
 
+    fn open_web(&mut self) {
+        match open::that_detached(self.web_url.as_str()) {
+            Ok(()) => self.web_opened = true,
+            Err(error) => eprintln!("atag-agent-tray: 打开网页失败: {error}"),
+        }
+    }
+
     /// Return true once a requested exit can safely close the tray.
     fn handle(&mut self, event: Event) -> bool {
         match event {
             Event::Menu(event) => match event.id().as_ref() {
                 START => self.start(),
                 STOP => self.stop(),
-                OPEN_WEB => {
-                    if let Some(url) = &self.web_url
-                        && let Err(error) = open::that_detached(url.as_str())
-                    {
-                        eprintln!("atag-agent-tray: 打开网页失败: {error}");
-                    }
-                }
+                OPEN_WEB => self.open_web(),
                 QUIT => {
                     self.quitting = true;
                     self.stop();
@@ -169,6 +170,9 @@ impl Tray {
                     println!("ATAG v1 bridge listening on http://{address}");
                     self.status = Status::Running(address);
                     self.refresh();
+                    if !self.web_opened {
+                        self.open_web();
+                    }
                 }
             }
             Event::Service(service::Event::Finished(result)) => {
@@ -190,7 +194,7 @@ fn forward_menu_events(dispatch: &Dispatch) {
 }
 
 #[cfg(target_os = "linux")]
-pub fn run(config: ServerConfig, web_url: Option<Url>) -> Result<()> {
+pub fn run(config: ServerConfig, web_url: Url) -> Result<()> {
     let (events, incoming) = std::sync::mpsc::channel();
     let dispatch: Dispatch = Arc::new(move |event| {
         let _ = events.send(event);
@@ -207,7 +211,7 @@ pub fn run(config: ServerConfig, web_url: Option<Url>) -> Result<()> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-pub fn run(config: ServerConfig, web_url: Option<Url>) -> Result<()> {
+pub fn run(config: ServerConfig, web_url: Url) -> Result<()> {
     use tao::{
         event::{Event as TaoEvent, StartCause},
         event_loop::{ControlFlow, EventLoopBuilder},

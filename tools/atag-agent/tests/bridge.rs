@@ -110,6 +110,8 @@ async fn bridge_connects_without_credentials_and_requires_exact_origin() {
         StatusCode::FORBIDDEN
     );
     for path in [
+        "/",
+        "/index.html",
         "/v1/authorize",
         "/v1/devices",
         "/v1/auth/state",

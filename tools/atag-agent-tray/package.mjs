@@ -60,7 +60,8 @@ try {
   writeFileSync(join(resources, "README.txt"), `ATAG Agent ${version}
 
 打开 ${mac ? "ATAG Agent.app" : windows ? "atag-agent-tray.exe" : "atag-agent-tray"} 启动托盘。
-在托盘菜单选择“打开 ATAG 网页”，浏览器会自动寻找本机 Agent。
+本地 API 就绪后会在浏览器打开网页，网页会自动寻找本机 Agent。
+托盘菜单中的“打开 ATAG 网页”可再次打开网页。
 ${webUrl.href}
 
 首次使用默认的模拟 macOS 登录时，Agent 联网从 Apple 下载并校验 CoreADI 运行库，
