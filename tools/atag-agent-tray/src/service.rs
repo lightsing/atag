@@ -99,7 +99,7 @@ mod tests {
     fn bridge_serves_health_and_releases_the_port_for_restart() {
         let directory = tempfile::tempdir().unwrap();
         let mut config = ServerConfig {
-            listen: "127.0.0.1:0".parse().unwrap(),
+            listen: Some("127.0.0.1:0".parse().unwrap()),
             data_dir: Some(directory.path().into()),
             ..ServerConfig::default()
         };
@@ -112,7 +112,7 @@ mod tests {
         client.read_to_string(&mut response).unwrap();
         assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
         assert!(response.contains("\"protocolVersion\":1"));
-        config.listen = address;
+        config.listen = Some(address);
 
         let (_stop_conflict, conflict_events) = launch(config.clone());
         let Event::Finished(Err(error)) = conflict_events.recv_timeout(WAIT).unwrap() else {

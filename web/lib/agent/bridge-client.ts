@@ -3,7 +3,7 @@ import type {QueryAccount} from '../workspace/types';
 import type {AnisetteResponse,AppleRelayRequest,AppleRelayResponse,AppleTransport} from '../auth/types';
 import {base64,unbase64} from '../workspace/crypto.ts';
 export interface CiphertextReport{id:string;payload:string}
-export interface BridgeHealth{protocolVersion:1;agentVersion:string;capabilities:{anisette:boolean;appleRelay:boolean}}
+export interface BridgeHealth{service?:string;protocolVersion:1;agentVersion:string;capabilities:{anisette:boolean;appleRelay:boolean}}
 
 // Keep the browser outside the agent's deadlines: machine worker 240s / HTTP
 // 245s, Apple authentication 60s / HTTP 65s. Health remains a fast connectivity check.
@@ -40,7 +40,7 @@ export class BridgeClient implements AppleTransport{
   }
   async connect(signal?:AbortSignal):Promise<BridgeHealth>{
     const health=await this.request<BridgeHealth>('/v1/health',undefined,signal);
-    if(health.protocolVersion!==1||health.capabilities?.anisette!==true||health.capabilities?.appleRelay!==true)throw new ClientError('VERSION_MISMATCH','请更新本地桥接以支持网页登录所需的 Anisette 和 Apple 请求转发。');
+    if(health?.protocolVersion!==1||typeof health.agentVersion!=='string'||health.capabilities?.anisette!==true||health.capabilities?.appleRelay!==true)throw new ClientError('VERSION_MISMATCH','请更新本地桥接以支持网页登录所需的 Anisette 和 Apple 请求转发。');
     return health;
   }
   async getAnisette(source:string,uid:string,deviceId:string,clientProfile:'auto'|'macos'|'windows'='auto',signal?:AbortSignal):Promise<AnisetteResponse>{

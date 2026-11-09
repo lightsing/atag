@@ -1,0 +1,40 @@
+name: ATAG tray packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      web_url:
+        description: ATAG website URL opened by the tray
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15, name: macos-arm64 }
+          - { os: macos-15-intel, name: macos-x64 }
+          - { os: windows-2025, name: windows-x64 }
+          - { os: ubuntu-22.04, name: linux-x64 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node tools/atag-agent-tray/package.mjs "$ATAG_TRAY_WEB_URL"
+        shell: bash
+        env:
+          ATAG_TRAY_WEB_URL: ${{ inputs.web_url }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ATAG-Agent-${{ matrix.name }}
+          path: target/packages/ATAG-Agent-*
+          if-no-files-found: error

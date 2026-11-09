@@ -19,6 +19,10 @@ npm run build
 开发端口为 5173，生产构建使用 Vinext / Vite 和 Sites 插件，输出到 `dist/`。
 `.openai/hosting.json` 保存站点配置。构建、测试和发布输出不进入源码。
 
+公开站点在 [ATAG Pages](https://lightsing.github.io/atag-pages/)。GitHub Pages 使用
+Next.js 静态导出。设定 `ATAG_PAGES_BASE_PATH=/atag-pages` 并运行 `npm run build:pages`。
+将 `out/` 的内容连同 `.nojekyll` 发布到 `lightsing/atag-pages` 的 `main` 分支。
+
 ## 数据与备份
 
 设备档案可离线创建、编辑和删除。固定档案持有一把私钥；轮换档案持有主私钥和
@@ -38,7 +42,8 @@ Apple 查询会话；密码和验证码永不包含。密钥或芯片绑定冲�
 cargo run -p atag-agent -- serve
 ```
 
-在网页设置中填写 loopback 地址，测试连接后登录 Apple 账号，无需访问令牌。浏览器
+网页打开时自动探测本机 Agent。探测失败后，在设置中重试，或填写托盘和 CLI
+显示的 loopback 地址。浏览器要求本地网络权限时，允许后可重新探测。浏览器
 计算 SRP 证明、校验服务端证明并处理双重认证；最终查询会话在完整成功后原子保存。
 验证码只能通过用户选择的真实验证方式发送。关闭设置、取消或断开桥接会终止
 未完成的登录，失败不会覆盖已有会话。

@@ -69,7 +69,7 @@ impl Bridge {
         })
     }
     pub fn router(&self) -> Router {
-        Router::new().route("/v1/health",get(||async{Json(json!({"protocolVersion":1,"agentVersion":env!("CARGO_PKG_VERSION"),"capabilities":{"anisette":true,"appleRelay":true},"storage":"none"}))}))
+        Router::new().route("/v1/health",get(||async{Json(json!({"service":"atag-agent","protocolVersion":1,"agentVersion":env!("CARGO_PKG_VERSION"),"capabilities":{"anisette":true,"appleRelay":true},"storage":"none"}))}))
             .route("/v1/anisette",post(anisette))
             .route("/v1/apple/request",post(forward))
             .fallback(||async{ApiError::not_found()})

@@ -17,7 +17,7 @@
 
 | 方法 | 路径 | 内容 |
 | --- | --- | --- |
-| GET | /v1/health | protocolVersion=1，capabilities.anisette=true、appleRelay=true，storage=none；无用户信息，客户端据此检查版本与能力 |
+| GET | /v1/health | service=atag-agent，protocolVersion=1，capabilities.anisette=true、appleRelay=true，storage=none。客户端据此验证服务、版本与能力 |
 | POST | /v1/anisette | 请求 source、uid、deviceId、clientProfile；返回 headers、clientInfo、userAgent |
 | POST | /v1/apple/request | 请求 endpoint、method、headers、bodyBase64?；返回 status、headers（仅 content-type）、bodyBase64 |
 
@@ -30,7 +30,7 @@ Apple endpoint 只能为 gsa、mobileme、methods、sms_request、sms_submit、t
 ## 访问与容量
 
 - 只监听 loopback；精确 Host / Origin、CORS/OPTIONS、私网预检和 Cache-Control:no-store 保留。
-- 网页只在用户点击连接后访问本地地址。连接无需访问令牌，Agent 不创建传输或用户状态文件；Anisette 机器材料与运行库按需缓存。
+- 网页打开时向共享的 IPv4 loopback 端口列表及用户保存的本机地址发送限时健康检查。发现失败可重试或手动连接。连接无需访问令牌，Anisette 机器材料与运行库按需缓存。
 - 请求体最多 64 KiB，固定转发方法、头和 Base64 大小受限；每次上游响应最多 8 MiB，最多 2 个并发请求。连接/上游与总请求有超时。
 - Apple 上游使用独立的 HTTP/1.1 连接，禁用空闲连接复用，避免 GrandSlam 初始化成功后，密码证明请求在复用连接上一直等待响应。TLS 证书验证和现有超时预算保持启用，不自动重发认证请求。
 - 超时按操作分层：Apple 认证步骤上游 60 秒、HTTP 桥接 65 秒、浏览器 70 秒；Find My 报告上游仍为 20 秒。Anisette HTTP 桥接 245 秒、浏览器 250 秒，覆盖本地/便携子进程的 240 秒初始化预算；其他来源的内部上限不变。健康检查在浏览器仍只等待 8 秒。

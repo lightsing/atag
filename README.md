@@ -3,6 +3,8 @@
 ATAG 包含 Find My 广播算法、nRF52832 固件与 OTA bootloader、浏览器管理界面、
 本地 Apple 请求桥接，以及配置、量产和诊断工具。
 
+[打开 ATAG 网页](https://lightsing.github.io/atag-pages/)
+
 项目发行版本为 `0.1.0`；自有桥接 API、GATT 协议、Flash 记录和浏览器数据格式
 统一从 `v1` 开始。仓库只维护当前实现与当前协议。数据结构校验拒绝其他版本，
 不提供旧格式导入、自动迁移或旧接口回退。生成的固件、量产记录、测试输出和构建

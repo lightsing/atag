@@ -1,6 +1,7 @@
 import type { WorkspaceClient,WorkspaceOperation,AuthState,DeviceMetadataPatch,ProvisioningBundle,ProvisioningBundleRequest,ReportPage,ReportQuery,TagDevice } from '../contracts';
 import { ClientError,toClientError } from '../client-support.ts';
 import { BridgeClient,type BridgeHealth } from '../agent/bridge-client.ts';
+import { discoverBridge } from '../agent/discovery.ts';
 import { IndexedDbWorkspaceStore,type WorkspaceStore } from './store.ts';
 import { base64,generateMaterial,makeConfiguration,reportKeys,decryptReport,unbase64 } from './crypto.ts';
 import { exportEncryptedBackup,openEncryptedBackup,mergeRecords,stats,validateWorkspace } from './backup.ts';
@@ -42,6 +43,13 @@ export class BrowserWorkspaceClient implements WorkspaceClient {
   async connectBridge(url:string,signal?:AbortSignal):Promise<BridgeHealth>{
     const bridge=new BridgeClient(url);const health=await bridge.connect(signal);signalCheck(signal);this.#bridge=bridge;
     return health;
+  }
+  async discoverBridge(preferred: string, signal?: AbortSignal): Promise<{url:string;health:BridgeHealth}|null> {
+    const found = await discoverBridge(preferred, signal);
+    signalCheck(signal);
+    if (!found) return null;
+    this.#bridge = found.client;
+    return {url:found.client.baseUrl,health:found.health};
   }
   disconnectBridge(){this.#login.cancel();this.#bridge=null;this.#generation++;}
   async getAuthState():Promise<AuthState>{const data=await this.store.read();return {status:data.account?(data.accountExpired?'expired':'ready'):'not_configured',accountLabel:data.account?.accountLabel??null};}

@@ -33,7 +33,7 @@ interface SettingsSheetProps {
   onAnisetteUrlChange(url: string): void;
   clientProfile: ClientProfile;
   onClientProfileChange(profile: ClientProfile): void;
-  onConnect(url: string): Promise<boolean>;
+  onConnect(url?: string): Promise<boolean>;
 }
 
 const ERROR_TITLES: Partial<Record<string, string>> = {
@@ -49,6 +49,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
   const { bridge } = session;
   const [url, setUrl] = useState(props.agentUrl);
   const [urlError, setUrlError] = useState<string | null>(null);
+  const [manual, setManual] = useState(false);
   const returnFocus = useRef<HTMLElement | null>(null);
 
   useEffect(() => setUrl(props.agentUrl), [props.agentUrl]);
@@ -77,8 +78,10 @@ export function SettingsSheet(props: SettingsSheetProps) {
     }
     setUrlError(null);
     setUrl(checked.url);
-    props.onAgentUrlChange(checked.url);
-    await props.onConnect(checked.url);
+    if (await props.onConnect(checked.url)) {
+      props.onAgentUrlChange(checked.url);
+      setManual(false);
+    }
   };
 
   return (
@@ -136,52 +139,53 @@ export function SettingsSheet(props: SettingsSheetProps) {
             </div>
             <BridgeCard bridge={bridge} hasAccount={session.auth?.status === "ready"} />
 
-            <form onSubmit={test} className="space-y-3">
-              <div className="grid gap-1.5">
-                <label htmlFor="agent-url" className="text-[13px] font-medium">地址</label>
-                <input
-                  id="agent-url"
-                  value={url}
-                  onChange={(e) => {
-                    setUrl(e.target.value);
-                    setUrlError(null);
-                  }}
-                  placeholder={DEFAULT_AGENT_URL}
-                  inputMode="url"
-                  autoComplete="off"
-                  spellCheck={false}
-                  disabled={connecting}
-                  aria-invalid={!!urlError}
-                  aria-describedby="agent-url-hint"
-                  className="h-10 rounded-xl border border-input bg-card px-3 font-mono text-[13px] outline-none focus-visible:border-persimmon focus-visible:ring-2 focus-visible:ring-persimmon/25"
-                />
-                <p id="agent-url-hint" className={cn("text-xs", urlError ? "text-danger" : "text-ink-faint")}>
-                  {urlError ?? "只接受 http/https，不含用户名、查询参数或 #。点击测试前不会发出任何请求。"}
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {connecting ? (
-                  <Button type="button" variant="outline" onClick={session.cancelBridgeConnect}>
-                    <Loader2 className="animate-spin" /> 取消连接
-                  </Button>
-                ) : (
-                  <Button type="submit">
-                    <PlugZap /> {bridge.status === "error" ? "重试连接" : connected ? "重新连接" : "测试连接"}
-                  </Button>
-                )}
-                {connected && (
-                  <Button type="button" variant="outline" onClick={session.disconnectBridge}>
-                    断开
-                  </Button>
-                )}
-              </div>
-            </form>
+            {!connecting && (bridge.status === "error" || manual) && (
+              <form onSubmit={test} className="space-y-3">
+                <div className="grid gap-1.5">
+                  <label htmlFor="agent-url" className="text-[13px] font-medium">地址</label>
+                  <input
+                    id="agent-url"
+                    value={url}
+                    onChange={(e) => {
+                      setUrl(e.target.value);
+                      setUrlError(null);
+                    }}
+                    placeholder={DEFAULT_AGENT_URL}
+                    inputMode="url"
+                    autoComplete="off"
+                    spellCheck={false}
+                    aria-invalid={!!urlError}
+                    aria-describedby="agent-url-hint"
+                    className="h-10 rounded-xl border border-input bg-card px-3 font-mono text-[13px] outline-none focus-visible:border-persimmon focus-visible:ring-2 focus-visible:ring-persimmon/25"
+                  />
+                  <p id="agent-url-hint" className={cn("text-xs", urlError ? "text-danger" : "text-ink-faint")}>
+                    {urlError ?? "填写 Agent 显示的本机地址，支持 127.0.0.1、localhost 和 [::1]。"}
+                  </p>
+                </div>
+                <Button type="submit"><PlugZap /> 手动连接</Button>
+              </form>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              {connecting ? (
+                <Button type="button" variant="outline" onClick={session.cancelBridgeConnect}>取消连接</Button>
+              ) : connected ? (
+                <Button type="button" variant="outline" onClick={session.disconnectBridge}>断开</Button>
+              ) : (
+                <Button type="button" variant="outline" onClick={() => { setManual(false); void props.onConnect(); }}>
+                  <PlugZap /> 重新探测
+                </Button>
+              )}
+              {!connecting && !manual && bridge.status !== "error" && (
+                <Button type="button" variant="ghost" onClick={() => setManual(true)}>手动指定地址</Button>
+              )}
+            </div>
 
             <div className="rounded-xl border border-line bg-card px-3.5 py-3 text-[12.5px] leading-relaxed text-ink-soft">
               <p className="font-medium text-ink">关于浏览器限制</p>
               <p className="mt-1">
-                从 HTTPS 页面访问 http://127.0.0.1 可能被浏览器的混合内容、CORS 或本地网络访问权限阻止，不同浏览器表现不同。桥接需要自行允许本页的
-                Origin。连接失败不影响此浏览器中的数据。
+                如果浏览器询问是否允许访问本地网络，请允许后重新探测。发布版托盘已允许访问随附的网页地址。自行运行 CLI 时，需要用
+                --allow-origin 允许本页的 Origin。
               </p>
             </div>
           </section>
@@ -201,7 +205,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
             <h3 id="about-title" className="font-medium text-ink">当前能力边界</h3>
             <ul className="mt-1 list-disc space-y-0.5 pl-4">
               <li>设备档案、私钥、查询设置与历史报告归此浏览器所有；新密钥在浏览器内生成，不需要 agent。</li>
-              <li>本地 atag-agent 只是桥接：运行 serve 后填写地址即可连接；它只提供 Anisette 并转发 Apple 请求，不保存任何用户数据。</li>
+              <li>启动托盘或 atag-agent serve 后，网页会探测本地桥接。找不到时可重新探测或手动填入地址。</li>
               <li>Apple 登录在本页完成：密码凭证在浏览器内计算，验证码在本页输入，登录结果只保存在此浏览器。</li>
               <li>附近管理（固件 0.1.0）：短按 Tag 后可连接辨认、读电压与遥测、改名、调参数、配置密钥、重启或恢复出厂，与桥接状态无关。</li>
               <li>附近管理不提供坐标；地图中的报告来自 Find My 网络，不代表 Tag 在附近。</li>
@@ -216,7 +220,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
 
 function BridgeCard({ bridge, hasAccount }: { bridge: BridgeConnection; hasAccount: boolean }) {
   if (bridge.status === "connecting") {
-    return <StatusCard icon={<Loader2 className="size-4 animate-spin text-persimmon" />} title="连接中" text="正在检查桥接版本与能力…" />;
+    return <StatusCard icon={<Loader2 className="size-4 animate-spin text-persimmon" />} title="连接中" text={bridge.discovering ? "正在探测本地 Agent…" : "正在检查桥接版本与能力…"} />;
   }
   if (bridge.status === "connected") {
     const { health } = bridge;
@@ -226,7 +230,7 @@ function BridgeCard({ bridge, hasAccount }: { bridge: BridgeConnection; hasAccou
         icon={hasAccount ? <CheckCircle2 className="size-4 text-ok" /> : <ShieldAlert className="size-4 text-warn" />}
         title={`桥接可达 · atag-agent ${health.agentVersion}`}
         text={hasAccount ? "可以下载新报告。" : "桥接已连接。登录 Apple 账号后即可下载新报告。"}
-        extra={`协议 v${health.protocolVersion}`}
+        extra={`${bridge.url} · 协议 v${health.protocolVersion}`}
       />
     );
   }
@@ -241,7 +245,7 @@ function BridgeCard({ bridge, hasAccount }: { bridge: BridgeConnection; hasAccou
       />
     );
   }
-  return <StatusCard icon={<CircleDashed className="size-4 text-ink-faint" />} title="未连接" text="登录 Apple 或下载报告前，填写地址后点击“测试连接”。" />;
+  return <StatusCard icon={<CircleDashed className="size-4 text-ink-faint" />} title="未连接" text="启动本地 Agent 后可重新探测。" />;
 }
 
 function StatusCard({

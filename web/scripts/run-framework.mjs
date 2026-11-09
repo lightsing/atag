@@ -3,7 +3,16 @@ import { fileURLToPath } from "node:url";
 import { readExecutionProfile } from "./execution-profile.mjs";
 
 const [command, ...args] = process.argv.slice(2);
-if (!["dev", "build"].includes(command)) throw new Error("Expected dev or build.");
+if (command === "pages") {
+  const cli = fileURLToPath(new URL("../node_modules/next/dist/bin/next", import.meta.url));
+  const result = spawnSync(process.execPath, [cli, "build", ...args], {
+    env: { ...process.env, ATAG_PAGES: "1" },
+    stdio: "inherit",
+  });
+  if (result.error) throw result.error;
+  process.exit(result.status ?? 1);
+}
+if (!["dev", "build"].includes(command)) throw new Error("Expected dev, build or pages.");
 const managedLinux = readExecutionProfile() === "managed-linux";
 
 if (managedLinux && command === "build") {

@@ -8,12 +8,12 @@ Agent 只提供 Anisette 和限定 Apple 地址的请求转发。账号、密码
 cargo run -p atag-agent -- serve
 ```
 
-默认 http://127.0.0.1:18432，只监听 loopback。网页设置中填写地址，测试连接后直接登录 Apple 账号；支持受信任设备与短信验证，无需终端登录或导入账号文件。登录密码证明在浏览器计算，Agent 不接收原始密码。桥接无需访问令牌，启动不会创建传输或用户状态文件。
+默认只监听 IPv4 loopback。Agent 优先使用 `127.0.0.1:18432`，占用时按网页共用的固定端口序列尝试下一个端口。网页打开时自动寻找可用的 Agent，找不到时可填写实际地址。登录支持受信任设备与短信验证，密码证明在浏览器计算。桥接无需访问令牌。
 
-部署网页需允许精确 Origin：
+使用 CLI 为发布站点提供桥接时，允许该站点的 Origin。
 
 ```sh
-cargo run -p atag-agent -- serve --allow-origin https://atag-hhq.flutedbrink.chatgpt.site
+cargo run -p atag-agent -- serve --allow-origin https://lightsing.github.io
 ```
 
 ## 桌面托盘
@@ -25,7 +25,13 @@ cargo build --locked -p atag-agent -p atag-agent-tray -p atag-coreadi-worker
 cargo run --locked -p atag-agent-tray -- --web-url https://atag-hhq.flutedbrink.chatgpt.site
 ```
 
-`--web-url` 会显示“打开 ATAG 网页”菜单项，并将该网址的 Origin 加入白名单。托盘和 CLI 共用 `--listen`、`--allow-origin`、`--data-dir` 和 `ATAG_AGENT_DATA_DIR`。默认端口为 `18432`，已有实例占用时可用菜单重试，或用 `--listen 127.0.0.1:18433` 启动。CoreADI 的安装和初始化使用下文的 CLI 命令，运行时将 `atag-coreadi-worker` 与托盘程序放在同一目录。
+`--web-url` 会显示“打开 ATAG 网页”菜单项，并将该网址的 Origin 加入白名单。托盘和 CLI 共用 `--listen`、`--allow-origin`、`--data-dir` 和 `ATAG_AGENT_DATA_DIR`。显式指定 `--listen 127.0.0.1:18433` 时只尝试该地址。CoreADI 的安装和初始化使用下文的 CLI 命令，运行时将 `atag-coreadi-worker` 与托盘程序放在同一目录。
+
+在 GitHub Actions 的 **ATAG tray packages** 工作流填入发布网页 URL，可以构建并下载
+macOS、Windows 和 Linux 压缩包。也可以在目标平台运行
+`node tools/atag-agent-tray/package.mjs <网页 URL>`，产物位于 `target/packages/`。
+压缩包包含托盘、CLI 和 Rust CoreADI worker，启动托盘无需 Python。macOS 包为临时签名，
+首次使用模拟 CoreADI 时需要按下文导入 Apple 运行库。
 
 ## 嵌入 Rust 应用
 

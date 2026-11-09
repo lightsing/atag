@@ -9,6 +9,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BridgeClient } from "../../../web/lib/agent/bridge-client.ts";
+import { discoverBridge } from "../../../web/lib/agent/discovery.ts";
+import ports from "../../../web/lib/agent/discovery-ports.json" with { type: "json" };
 import { BrowserWorkspaceClient } from "../../../web/lib/workspace/browser-workspace-client.ts";
 import { MemoryWorkspaceStore } from "../../../web/lib/workspace/store.ts";
 import { parseConfigPackage } from "../../../web/lib/ble/protocol.ts";
@@ -19,7 +21,18 @@ const directory = await mkdtemp(join(tmpdir(), "atag-agent-http-"));
 const env = { ...process.env };
 delete env.ATAG_ANISETTE_URL;
 delete env.ATAG_AGENT_DATA_DIR;
-const server = spawn(binary, ["--data-dir", directory, "serve", "--listen", "127.0.0.1:0", "--allow-origin", "http://localhost:5173"], { env, stdio: ["ignore", "pipe", "pipe"] });
+// Occupy the legacy port with a different HTTP service and leave Agent on automatic selection.
+const occupied = createServer((_request, response) => response.end(JSON.stringify({
+  service: "another-service",
+  protocolVersion: 1,
+  agentVersion: "0.1.0",
+  capabilities: { anisette: true, appleRelay: true },
+})));
+await new Promise((resolve, reject) => {
+  occupied.once("error", (error) => error.code === "EADDRINUSE" ? resolve() : reject(error));
+  occupied.listen(ports[0], "127.0.0.1", resolve);
+});
+const server = spawn(binary, ["--data-dir", directory, "serve", "--allow-origin", "http://localhost:5173"], { env, stdio: ["ignore", "pipe", "pipe"] });
 const exited = once(server, "exit");
 let logs = "";
 server.stdout.on("data", chunk => { logs += chunk; });
@@ -35,11 +48,20 @@ try {
       if (match) { clearTimeout(timer); resolve(match[1]); }
     });
   });
-  const client = new BridgeClient(baseUrl, (url, init) => {
+  assert.ok(ports.slice(1).includes(Number(new URL(baseUrl).port)));
+  const requestFromWeb = (url, init) => {
     assert.equal(new Headers(init.headers).has("Authorization"), false);
     return fetch(url, { ...init, headers: { ...init.headers, Origin: "http://localhost:5173" } });
+  };
+  const discovered = await discoverBridge("", undefined, (url, init) => {
+    if (new URL(url).origin === baseUrl || (occupied.listening && Number(new URL(url).port) === ports[0])) {
+      return requestFromWeb(url, init);
+    }
+    return Promise.reject(new Error("Outside the integration test"));
   });
-  const health = await client.connect();
+  assert.equal(discovered?.client.baseUrl, baseUrl);
+  const { client, health } = discovered;
+  assert.equal(health.service, "atag-agent");
   assert.equal(health.protocolVersion, 1);
   assert.equal(health.capabilities.appleRelay, true);
   // Exercise Rust's normalized Anisette output, including its locale header.
@@ -81,5 +103,6 @@ try {
 } finally {
   if (server.exitCode === null && server.signalCode === null) server.kill("SIGTERM");
   await exited;
+  if (occupied.listening) await new Promise((resolve, reject) => occupied.close(error => error ? reject(error) : resolve()));
   await rm(directory, { recursive: true, force: true });
 }

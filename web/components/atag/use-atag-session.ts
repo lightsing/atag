@@ -20,6 +20,7 @@ import type { QuerySettings, WorkspaceStats, BackupSummary as BackupPreview } fr
 export type { QuerySettings, WorkspaceStats, BackupSummary as BackupPreview } from "@/lib/workspace/types";
 import type { AppleLoginInput, AppleLoginSnapshot } from "@/lib/auth/apple-login";
 import { BrowserWorkspaceClient } from "@/lib/workspace/browser-workspace-client";
+import { loadPreferences } from "@/lib/preferences";
 
 /**
  * Loopback bridge: supplies Anisette and forwards allowlisted Apple requests for
@@ -28,8 +29,8 @@ import { BrowserWorkspaceClient } from "@/lib/workspace/browser-workspace-client
  */
 export type BridgeConnection =
   | { status: "idle" }
-  | { status: "connecting" }
-  | { status: "connected"; health: BridgeHealth }
+  | { status: "connecting"; discovering: boolean }
+  | { status: "connected"; health: BridgeHealth; url: string }
   | { status: "error"; error: ClientError };
 
 export type LoadState = "idle" | "loading" | "ready" | "error";
@@ -70,7 +71,7 @@ export interface AtagSession {
   refreshTasks: Record<string, RefreshTask>;
   /** Bumps when reports for a device may have changed (refresh finished, restore, import). */
   reportsVersion: number;
-  connectBridge(url: string): Promise<boolean>;
+  connectBridge(url?: string): Promise<boolean>;
   cancelBridgeConnect(): void;
   disconnectBridge(): void;
   reloadDevices(): Promise<void>;
@@ -176,35 +177,35 @@ export function useAtagSession(): AtagSession {
   }, [loadDevices, refreshWorkspaceInfo]);
 
   const connectBridge = useCallback(
-    async (url: string): Promise<boolean> => {
+    async (url?: string): Promise<boolean> => {
       const signal = resetBridgeScope();
       const ws = workspaceRef.current;
       if (!ws) {
         setBridge({ status: "error", error: new ClientError("INTERNAL_ERROR", STORAGE_UNAVAILABLE) });
         return false;
       }
-      const checked = validateAgentBaseUrl(url);
-      if (!checked.ok) {
+      const checked = url === undefined ? undefined : validateAgentBaseUrl(url);
+      if (checked && !checked.ok) {
         setBridge({ status: "error", error: new ClientError("INVALID_REQUEST", checked.message) });
         return false;
       }
       // A new bridge never continues a sign-in that started on another one.
       ws.cancelAppleLogin();
       ws.disconnectBridge();
-      setBridge({ status: "connecting" });
+      setBridge({ status: "connecting", discovering: checked === undefined });
       try {
-        const health = await ws.connectBridge(checked.url, signal);
-        if (signal.aborted) {
-          ws.disconnectBridge();
+        const found = checked
+          ? { url: checked.url, health: await ws.connectBridge(checked.url, signal) }
+          : await ws.discoverBridge(loadPreferences().agentUrl, signal);
+        if (signal.aborted) return false;
+        if (!found) {
+          setBridge({ status: "error", error: new ClientError("AGENT_UNAVAILABLE", "未找到本地 Agent。启动托盘或 CLI 后可以重新探测，也可以手动输入地址。") });
           return false;
         }
-        setBridge({ status: "connected", health });
+        setBridge({ status: "connected", ...found });
         return true;
       } catch (error) {
-        if (signal.aborted) {
-          setBridge((current) => (current.status === "connecting" ? { status: "idle" } : current));
-          return false;
-        }
+        if (signal.aborted) return false;
         setBridge({ status: "error", error: toClientError(error) });
         return false;
       }
@@ -403,6 +404,8 @@ export function useAtagSession(): AtagSession {
 
   // Open the browser workspace on mount.
   useEffect(() => {
+    const scope = new AbortController();
+    scopeRef.current = scope;
     let unsubscribeLogin: (() => void) | null = null;
     try {
       const ws = new BrowserWorkspaceClient();
@@ -420,27 +423,25 @@ export function useAtagSession(): AtagSession {
         }
         lastPhase = snapshot.phase;
       });
-      const signal = scopeRef.current.signal;
       void refreshWorkspaceInfo();
-      void loadDevices(ws, signal);
+      void loadDevices(ws, scope.signal);
+      void connectBridge();
     } catch (error) {
       const failure = new ClientError("INTERNAL_ERROR", `${STORAGE_UNAVAILABLE}（${toClientError(error).message}）`);
       setStorageError(failure);
       setDevicesError(failure);
       setDevicesState("error");
     }
-    const scope = scopeRef;
     const bridgeScope = bridgeScopeRef;
     return () => {
       unsubscribeLogin?.();
       // Navigation / unmount never lets a sign-in finish in the background.
       workspaceRef.current?.cancelAppleLogin();
-      scope.current.abort();
+      scope.abort();
       bridgeScope.current.abort();
       workspaceRef.current?.disconnectBridge();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [connectBridge, loadDevices, refreshWorkspaceInfo]);
 
   return {
     client,

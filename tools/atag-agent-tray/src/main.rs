@@ -51,14 +51,20 @@ fn run(cli: Cli) -> Result<()> {
         return Ok(());
     }
 
+    let web_url = match cli.web_url {
+        Some(url) => Some(url),
+        None => option_env!("ATAG_TRAY_WEB_URL")
+            .map(parse_web_url)
+            .transpose()?,
+    };
     let mut config = cli.listen.config(cli.data_dir);
-    if let Some(url) = &cli.web_url {
+    if let Some(url) = &web_url {
         let origin = url.origin().ascii_serialization();
         if !config.allowed_origins.contains(&origin) {
             config.allowed_origins.push(origin);
         }
     }
-    tray::run(config, cli.web_url)
+    tray::run(config, web_url)
 }
 
 fn main() -> ExitCode {

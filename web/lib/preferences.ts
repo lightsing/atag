@@ -1,3 +1,5 @@
+import discoveryPorts from "./agent/discovery-ports.json" with { type: "json" };
+
 /**
  * Non-sensitive preferences only (bridge address, Anisette source, client
  * profile, sort order). The Apple account name, password,
@@ -17,8 +19,8 @@ export interface Preferences {
 }
 
 const KEY = "atag.preferences.v1";
-export const DEFAULT_AGENT_URL = "http://127.0.0.1:18432";
-const DEFAULTS: Preferences = { agentUrl: DEFAULT_AGENT_URL, anisetteUrl: "", clientProfile: "auto", sort: "recent" };
+export const DEFAULT_AGENT_URL = `http://127.0.0.1:${discoveryPorts[0]}`;
+const DEFAULTS: Preferences = { agentUrl: "", anisetteUrl: "", clientProfile: "auto", sort: "recent" };
 const PROFILES: ClientProfile[] = ["auto", "macos", "windows"];
 
 export function loadPreferences(): Preferences {

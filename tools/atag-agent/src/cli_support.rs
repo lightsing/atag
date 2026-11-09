@@ -2,7 +2,7 @@
 use crate::{
     anisette::local::{self, LOCAL_WORKER_COMMAND},
     error::ApiError,
-    server::{DEFAULT_LISTEN, ServerConfig},
+    server::ServerConfig,
 };
 use clap::{Args, Subcommand};
 use std::{
@@ -12,9 +12,9 @@ use std::{
 
 #[derive(Args)]
 pub struct ListenArgs {
-    /// Loopback address to bind. Use port 0 to let the OS pick an available port.
-    #[arg(long, default_value_t = DEFAULT_LISTEN)]
-    listen: SocketAddr,
+    /// Exact loopback address. If omitted, use the first available discovery port.
+    #[arg(long)]
+    listen: Option<SocketAddr>,
     /// Exact web origin; repeat for multiple sites. Defaults to local ports 5173 and 3000.
     #[arg(long)]
     allow_origin: Vec<String>,
