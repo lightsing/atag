@@ -21,7 +21,7 @@
 | POST | /v1/anisette | 请求 source、uid、deviceId、clientProfile；返回 headers、clientInfo、userAgent |
 | POST | /v1/apple/request | 请求 endpoint、method、headers、bodyBase64?；返回 status、headers（仅 content-type）、bodyBase64 |
 
-Anisette `source` 省略或为空时使用 `mac-coreadi`（模拟 macOS CoreADI）。显式 `local` 仍使用旧的本机后端；也支持 `portable`、`sidestore` 或 HTTPS / loopback HTTP 服务。`clientProfile` 为 `auto`、`macos` 或 `windows`，模拟 CoreADI 和 SideStore 始终使用与机器注册一致的客户端资料。请求不含账号或密码。模拟器安装与机器初始化见 [Agent README](../tools/atag-agent/README.md)。
+Anisette `source` 省略或为空时使用 `mac-coreadi`（模拟 macOS CoreADI）。首个请求按需从 Apple 下载并验证运行库，并为新数据目录注册机器身份。显式 `local` 仍使用旧的本机后端，也支持 `portable`、`sidestore` 或 HTTPS / loopback HTTP 服务。`clientProfile` 为 `auto`、`macos` 或 `windows`，模拟 CoreADI 和 SideStore 始终使用与机器注册一致的客户端资料。请求不含账号或密码。安装与初始化见 [Agent README](../tools/atag-agent/README.md)。
 
 Apple endpoint 只能为 gsa、mobileme、methods、sms_request、sms_submit、trusted_request、trusted_submit、findmy。各自 URL 和 GET/POST/PUT 方法固定在 Rust，网页无法提交任意 URL、文件路径或命令。Host / Cookie / 转发控制头被拒绝；不跟随重定向，不代理 Set-Cookie，不记录请求体或响应凭据。Apple TLS 仍验证证书，固定 Apple endpoint 使用已有官方根证书。
 

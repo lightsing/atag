@@ -26,12 +26,21 @@ function run(command, args, env = process.env) {
   execFileSync(command, args, { cwd: root, env, stdio: "inherit" });
 }
 
-run("cargo", ["build", "--locked", "--release", ...programs.flatMap((name) => ["-p", name])], {
+const buildEnv = {
   ...process.env,
   ATAG_TRAY_WEB_URL: webUrl.href,
   CARGO_PROFILE_RELEASE_DEBUG: "0",
   CARGO_PROFILE_RELEASE_STRIP: "symbols",
-});
+};
+if (windows) {
+  const staticRuntime = "-Ctarget-feature=+crt-static";
+  if (buildEnv.CARGO_ENCODED_RUSTFLAGS !== undefined) {
+    buildEnv.CARGO_ENCODED_RUSTFLAGS = [buildEnv.CARGO_ENCODED_RUSTFLAGS, staticRuntime].filter(Boolean).join("\x1f");
+  } else {
+    buildEnv.RUSTFLAGS = [buildEnv.RUSTFLAGS, staticRuntime].filter(Boolean).join(" ");
+  }
+}
+run("cargo", ["build", "--locked", "--release", ...programs.flatMap((name) => ["-p", name])], buildEnv);
 
 const stage = mkdtempSync(join(tmpdir(), "atag-tray-"));
 try {
@@ -54,8 +63,8 @@ try {
 在托盘菜单选择“打开 ATAG 网页”，浏览器会自动寻找本机 Agent。
 ${webUrl.href}
 
-首次使用模拟 macOS CoreADI 时，用同一目录的 atag-agent CLI 导入运行库并初始化。
-已有 Agent 数据目录可以继续使用。详见仓库 tools/atag-agent/README.md。
+首次使用默认的模拟 macOS 登录时，Agent 联网从 Apple 下载并校验 CoreADI 运行库，
+然后自动注册机器身份。以后直接复用本地缓存。已有 Agent 数据目录可以继续使用。
 ${mac ? "CLI 位于 ATAG Agent.app/Contents/MacOS/。\n" : ""}`);
 
   if (mac) {

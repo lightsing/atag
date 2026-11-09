@@ -35,6 +35,9 @@ async fn call(
 #[tokio::test]
 async fn omitted_anisette_source_uses_coreadi_without_falling_back_to_another_machine() {
     let directory = tempfile::tempdir().unwrap();
+    let cache = directory.path().join("anisette/mac-coreadi");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(cache.join("CoreADI.x86_64"), b"invalid cached runtime").unwrap();
     let bridge = Bridge::with_directory(
         ApiConfig {
             address: "127.0.0.1:18432".parse().unwrap(),
@@ -64,7 +67,7 @@ async fn omitted_anisette_source_uses_coreadi_without_falling_back_to_another_ma
         body["error"]["message"]
             .as_str()
             .unwrap()
-            .contains("install-mac-coreadi")
+            .contains("CoreADI 运行库校验失败")
     );
     assert!(body.get("headers").is_none());
 }

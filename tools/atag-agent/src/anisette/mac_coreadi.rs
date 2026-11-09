@@ -1,4 +1,5 @@
 //! Isolated macOS CoreADI emulator. The runtime and cache are machine-only.
+mod download;
 mod machine;
 mod protocol;
 mod provisioning;
@@ -12,6 +13,7 @@ use protocol::{Reply, Request};
 use sha2::{Digest, Sha256};
 use std::{
     fs,
+    io::ErrorKind,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -32,27 +34,50 @@ fn directory(data: &Path) -> PathBuf {
 fn checked_library(path: &Path) -> Result<Vec<u8>, ApiError> {
     let bytes = private_files::read_bounded(path, protocol::LIBRARY_LIMIT)
         .map_err(|_| local::failure("缺少可读取的 macOS CoreADI 运行库文件。"))?;
-    if hex(&Sha256::digest(&bytes)) != LIBRARY_HASH {
-        return Err(local::failure("macOS CoreADI 运行库校验失败。"));
-    }
+    verify_library(&bytes)?;
     Ok(bytes)
 }
 
+fn verify_library(bytes: &[u8]) -> Result<(), ApiError> {
+    if hex(&Sha256::digest(bytes)) != LIBRARY_HASH {
+        return Err(local::failure("macOS CoreADI 运行库校验失败。"));
+    }
+    Ok(())
+}
+
 pub(super) fn install(data: &Path, library: &Path, machine: Option<&Path>) -> Result<(), ApiError> {
-    private_files::prepare_private_directory(data)?;
-    let parent = data.join("anisette");
-    private_files::prepare_private_directory(&parent)?;
     let target = directory(data);
-    if target.symlink_metadata().is_ok() {
+    let _lock = install_lock(&target)?;
+    if exists(&target)? {
         return Err(ApiError::invalid(
             "已安装 macOS CoreADI；现有机器身份未修改。",
         ));
     }
+    install_verified(&target, &checked_library(library)?, machine)
+}
+
+fn exists(path: &Path) -> Result<bool, ApiError> {
+    match path.symlink_metadata() {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn install_lock(target: &Path) -> Result<fs::File, ApiError> {
+    let parent = target.parent().ok_or_else(ApiError::internal)?;
+    let data = parent.parent().ok_or_else(ApiError::internal)?;
+    private_files::prepare_private_directory(data)?;
+    private_files::prepare_private_directory(parent)?;
+    local::lock_file(&parent.join("mac-coreadi.install.lock"), false)
+}
+
+fn install_verified(target: &Path, library: &[u8], machine: Option<&Path>) -> Result<(), ApiError> {
     let stage = tempfile::Builder::new()
         .prefix("mac-coreadi-")
-        .tempdir_in(&parent)?;
+        .tempdir_in(target.parent().ok_or_else(ApiError::internal)?)?;
     private_files::protect(stage.path(), true)?;
-    private_files::write_atomic(&stage.path().join(LIBRARY), &checked_library(library)?)?;
+    private_files::write_atomic(&stage.path().join(LIBRARY), library)?;
     if let Some(source) = machine {
         machine::import(source, &stage.path().join("machine"))?;
     }
@@ -68,25 +93,32 @@ impl Provider {
     }
 
     pub(super) async fn initialize(&self) -> Result<(), ApiError> {
-        self.run(true, 85).await.map(|_| ())
+        self.run(true).await.map(|_| ())
     }
 
     pub(super) async fn headers(&self) -> Result<Headers, ApiError> {
-        self.run(false, 25).await
+        self.run(false).await
     }
 
-    async fn run(&self, initialize: bool, seconds: u64) -> Result<Headers, ApiError> {
-        tokio::time::timeout(Duration::from_secs(seconds), self.generate(initialize))
+    async fn run(&self, repair_machine: bool) -> Result<Headers, ApiError> {
+        self.ensure_runtime().await?;
+        tokio::time::timeout(Duration::from_secs(85), self.generate(repair_machine))
             .await
             .map_err(|_| local::failure("macOS CoreADI 运行超时。"))?
     }
 
-    async fn generate(&self, initialize: bool) -> Result<Headers, ApiError> {
-        if !self.directory.is_dir() {
-            return Err(local::failure(
-                "尚未安装模拟 macOS CoreADI。请先运行 atag-agent anisette install-mac-coreadi，再运行 anisette init。",
-            ));
+    async fn ensure_runtime(&self) -> Result<(), ApiError> {
+        if exists(&self.directory)? {
+            return Ok(());
         }
+        let _lock = install_lock(&self.directory)?;
+        if !exists(&self.directory)? {
+            install_verified(&self.directory, &download::fetch().await?, None)?;
+        }
+        Ok(())
+    }
+
+    async fn generate(&self, repair_machine: bool) -> Result<Headers, ApiError> {
         private_files::protect(&self.directory, true)?;
         let directory = self.directory.canonicalize()?;
         let _lock = local::lock(&directory, false)?;
@@ -96,11 +128,10 @@ impl Provider {
         private_files::prepare_private_directory(&machine)?;
         let identity_path = machine.join("identity.json");
         let store_path = machine.join("store");
-        let (mut identity, store) = match Identity::load(&identity_path)? {
-            Some(identity) => (identity, machine::load_store(&store_path)?),
+        let (mut identity, store, fresh) = match Identity::load(&identity_path)? {
+            Some(identity) => (identity, machine::load_store(&store_path)?, false),
             // The identity is the commit marker for a newly registered machine.
-            None if initialize => (Identity::new(), protocol::Store::new()),
-            None => return Err(unprovisioned()),
+            None => (Identity::new(), protocol::Store::new(), true),
         };
         let mut worker = Worker::spawn(&library)?;
         let Reply::Opened { provisioned } = worker
@@ -114,7 +145,7 @@ impl Provider {
         };
         let (reply, registered_routing) = if provisioned {
             (worker.exchange(&Request::Headers).await?, None)
-        } else if initialize {
+        } else if fresh || repair_machine {
             let (reply, routing) = provisioning::run(&mut worker, &identity).await?;
             (reply, Some(routing))
         } else {

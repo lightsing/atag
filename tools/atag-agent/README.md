@@ -25,13 +25,13 @@ cargo build --locked -p atag-agent -p atag-agent-tray -p atag-coreadi-worker
 cargo run --locked -p atag-agent-tray -- --web-url https://atag-hhq.flutedbrink.chatgpt.site
 ```
 
-`--web-url` 会显示“打开 ATAG 网页”菜单项，并将该网址的 Origin 加入白名单。托盘和 CLI 共用 `--listen`、`--allow-origin`、`--data-dir` 和 `ATAG_AGENT_DATA_DIR`。显式指定 `--listen 127.0.0.1:18433` 时只尝试该地址。CoreADI 的安装和初始化使用下文的 CLI 命令，运行时将 `atag-coreadi-worker` 与托盘程序放在同一目录。
+`--web-url` 会显示“打开 ATAG 网页”菜单项，并将该网址的 Origin 加入白名单。托盘和 CLI 共用 `--listen`、`--allow-origin`、`--data-dir` 和 `ATAG_AGENT_DATA_DIR`。显式指定 `--listen 127.0.0.1:18433` 时只尝试该地址。运行时将 `atag-coreadi-worker` 与托盘程序放在同一目录。
 
 在 GitHub Actions 的 **ATAG tray packages** 工作流填入发布网页 URL，可以构建并下载
 macOS、Windows 和 Linux 压缩包。也可以在目标平台运行
 `node tools/atag-agent-tray/package.mjs <网页 URL>`，产物位于 `target/packages/`。
-压缩包包含托盘、CLI 和 Rust CoreADI worker，启动托盘无需 Python。macOS 包为临时签名，
-首次使用模拟 CoreADI 时需要按下文导入 Apple 运行库。
+压缩包包含托盘、CLI 和 Rust CoreADI worker，启动托盘无需 Python。macOS 包为 ad hoc
+签名。打开托盘后可以直接在网页登录，首次使用模拟 CoreADI 时会联网完成准备。
 
 ## 嵌入 Rust 应用
 
@@ -51,7 +51,13 @@ server.serve(async { let _ = tokio::signal::ctrl_c().await; }).await?;
 
 新登录默认使用“模拟 macOS（默认）” (`mac-coreadi`)。Agent 通过独立的 Rust 进程 `atag-coreadi-worker` 使用 Unicorn 执行 Apple 的 x86_64 CoreADI。源码构建需要 C/C++ 工具链、CMake 和 libclang。部署时将两个可执行文件放在同一目录。
 
-首次安装需准备 `CoreADI.x86_64`。在 macOS 上可以用 `pkgutil --expand-full` 解包 iTunes 安装器，从 `CoreADI.pkg/Payload` 下的 `System/Library/PrivateFrameworks/CoreADI.framework/Versions/A/CoreADI` 用 `lipo -thin x86_64` 提取切片。Agent 安装时校验 SHA-256。[Apple iTunes 12.8.3 安装包](https://support.apple.com/en-us/106374)
+首次登录时，Agent 从 Apple 下载 iTunes 安装镜像中约 3.5 MB 的 CoreADI 分段，校验
+SHA-256 后提取 `CoreADI.x86_64`，缓存运行库并完成机器注册。准备过程需要联网，升级
+时会复用原数据目录中的运行库和 `anisette/mac-coreadi/machine`。
+
+也可以用 CLI 手动导入运行库。在 macOS 上用 `pkgutil --expand-full` 解包 iTunes
+安装器，再用 `lipo -thin x86_64` 提取 `CoreADI.pkg/Payload` 中 CoreADI.framework
+的二进制切片。[Apple iTunes 12.8.3 安装包](https://support.apple.com/en-us/106374)
 
 ```sh
 cargo build --locked -p atag-agent -p atag-coreadi-worker
@@ -60,7 +66,8 @@ cargo run -p atag-agent --locked -- anisette install-mac-coreadi \
 cargo run -p atag-agent --locked -- anisette init
 ```
 
-升级时可直接使用原数据目录中的 CoreADI 和 `anisette/mac-coreadi/machine`。从其他目录导入时，在安装命令中加 `--machine /path/to/machine`。`anisette init` 会验证已有缓存，或通过 Apple 注册新的机器。后续请求复用机器标识和注册材料，客户端类型与模拟机器一致。
+从其他目录导入时，可在安装命令中加 `--machine /path/to/machine`。`anisette init`
+可单独触发准备和机器注册。后续请求复用机器标识和注册材料，客户端类型与模拟机器一致。
 
 `atag-coreadi-worker` 独立链接 `adi-core` 和 Unicorn，按 GPL-2.0-only 提供。[上游 `adi-core`](https://github.com/sacca97/os-findmy-e/tree/d4d2a832baf47d1cf43d989879950ac2aec45f47/native/adi-core) · [Worker 许可证](../atag-coreadi-worker/LICENSE)
 

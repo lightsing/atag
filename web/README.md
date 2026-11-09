@@ -19,9 +19,9 @@ npm run build
 开发端口为 5173，生产构建使用 Vinext / Vite 和 Sites 插件，输出到 `dist/`。
 `.openai/hosting.json` 保存站点配置。构建、测试和发布输出不进入源码。
 
-公开站点在 [ATAG Pages](https://lightsing.github.io/atag-pages/)。GitHub Pages 使用
-Next.js 静态导出。设定 `ATAG_PAGES_BASE_PATH=/atag-pages` 并运行 `npm run build:pages`。
-将 `out/` 的内容连同 `.nojekyll` 发布到 `lightsing/atag-pages` 的 `main` 分支。
+公开站点在 [ATAG Pages](https://lightsing.github.io/atag/)。`main` 的网页改动由
+GitHub Actions 构建并部署。要在本地验证相同路径，设定 `ATAG_PAGES_BASE_PATH=/atag`
+并运行 `npm run build:pages`，输出位于 `out/`。
 
 ## 数据与备份
 
@@ -48,7 +48,8 @@ cargo run -p atag-agent -- serve
 验证码只能通过用户选择的真实验证方式发送。关闭设置、取消或断开桥接会终止
 未完成的登录，失败不会覆盖已有会话。
 
-默认的 `mac-coreadi` 来源需要构建 Rust worker 并准备 CoreADI 运行库。[安装步骤](../tools/atag-agent/README.md#anisette)
+默认的 `mac-coreadi` 来源使用随托盘打包的 Rust worker。首次登录时 Agent 会从 Apple
+下载并校验 CoreADI 运行库，再注册机器身份。[准备流程](../tools/atag-agent/README.md#anisette)
 
 刷新报告使用 `findmy`：桥接返回密文，浏览器解密、校验、去重并保存。没有新
 报告是正常结果。报告电池电压固定按 2.4–4.2 V 六位编码解析，不换算百分比。

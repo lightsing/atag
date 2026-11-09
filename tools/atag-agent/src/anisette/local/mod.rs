@@ -133,8 +133,10 @@ pub async fn worker(directory: &Path, backend: &str) -> Result<(), ApiError> {
     Ok(())
 }
 pub(super) fn lock(directory: &Path, wait: bool) -> Result<std::fs::File, ApiError> {
-    let lock_path = directory.join("worker.lock");
-    if std::fs::symlink_metadata(&lock_path).is_ok_and(|m| m.file_type().is_symlink()) {
+    lock_file(&directory.join("worker.lock"), wait)
+}
+pub(super) fn lock_file(lock_path: &Path, wait: bool) -> Result<std::fs::File, ApiError> {
+    if std::fs::symlink_metadata(lock_path).is_ok_and(|m| m.file_type().is_symlink()) {
         return Err(ApiError::invalid("Anisette 锁文件不能是符号链接。"));
     }
     let lock = std::fs::OpenOptions::new()
@@ -142,8 +144,8 @@ pub(super) fn lock(directory: &Path, wait: bool) -> Result<std::fs::File, ApiErr
         .write(true)
         .create(true)
         .truncate(false)
-        .open(&lock_path)?;
-    protect(&lock_path, false)?;
+        .open(lock_path)?;
+    protect(lock_path, false)?;
     if wait {
         fs2::FileExt::lock_exclusive(&lock)
     } else {
