@@ -1,0 +1,34 @@
+name: ATAG agent
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: cargo fmt --package atag-agent --check
+      - run: cargo test -p atag-agent -p atag --locked
+      - run: npm ci --prefix web
+      - run: node tools/atag-agent/tests/bridge-client-smoke.mjs
+      - run: cargo clippy -p atag-agent --all-targets --locked -- -D warnings
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.85'
+      - run: cargo check -p atag-agent --locked

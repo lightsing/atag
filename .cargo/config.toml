@@ -1,0 +1,8 @@
+[alias]
+build-nrf52832 = "build --release --package atag-firmware-nrf52832 --target thumbv7em-none-eabihf"
+build-bootloader = "build --release --package atag-bootloader-nrf52832 --target thumbv7em-none-eabihf"
+run-nrf52832 = "run --release --package atag-firmware-nrf52832 --target thumbv7em-none-eabihf"
+
+[target.thumbv7em-none-eabihf]
+runner = "probe-rs run --chip nRF52832_xxAA"
+rustflags = ["-C", "link-arg=-Tlink.x"]

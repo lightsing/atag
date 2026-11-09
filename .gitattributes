@@ -1,0 +1,11 @@
+# Keep source checkouts consistent across macOS, Linux and Windows.
+* text=auto eol=lf
+
+# Public binary assets must retain their exact bytes.
+*.bin binary
+*.cer binary
+*.png binary
+
+# Preserve the vendor-supplied SoftDevice and license verbatim (CRLF).
+firmware-nrf52832/s112/*.hex binary
+firmware-nrf52832/s112/*license-agreement.txt -text whitespace=cr-at-eol

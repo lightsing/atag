@@ -1,0 +1,13 @@
+[package]
+name = "atagctl"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[dependencies]
+atag = { path = "../../atag" }
+atag-firmware-nrf52832 = { path = "../../firmware-nrf52832" }
+p224 = { version = "0.13.2", default-features = false, features = ["arithmetic"] }
+rand_core = { version = "0.6.4", features = ["getrandom"] }
+sha2 = "0.10.9"

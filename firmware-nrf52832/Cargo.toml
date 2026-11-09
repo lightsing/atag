@@ -1,0 +1,52 @@
+[package]
+name = "atag-firmware-nrf52832"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[dependencies]
+atag = { path = "../atag" }
+embedded-storage-async = "0.4.1"
+embassy-boot = { version = "=0.7.0", features = ["ed25519-salty"] }
+embassy-embedded-hal = "0.6.0"
+embassy-sync = "0.8.0"
+salty = "0.3.0"
+sha2 = { version = "0.10.9", default-features = false }
+
+[target.'cfg(target_arch = "arm")'.dependencies]
+cortex-m = "0.7.7"
+cortex-m-rt = "0.7.5"
+embassy-executor = "0.10.0"
+embassy-futures = "0.1.2"
+embassy-nrf = { version = "0.11.0", default-features = false, features = [
+    "nrf52832",
+    "time",
+] }
+embassy-time = "0.5.1"
+embassy-time-driver = { version = "0.2.2", features = ["tick-hz-32_768"] }
+embassy-time-queue-utils = "0.3.2"
+critical-section = "1.2.0"
+nrf-softdevice = { version = "0.1.0", features = [
+    "ble-gatt-server",
+    "ble-peripheral",
+    "ble-sec",
+    # ATT payload plus the SoftDevice write-event header exceeds 128 bytes.
+    "evt-max-size-256",
+    "critical-section-impl",
+    "nrf52832",
+    "s112",
+] }
+panic-halt = "1.0.0"
+static_cell = "2.1.1"
+
+[dev-dependencies]
+futures = "0.3.31"
+embedded-storage = "0.3.1"
+
+
+[[bin]]
+name = "atag-nrf52832"
+path = "src/main.rs"
+test = false
+bench = false

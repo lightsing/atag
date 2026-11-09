@@ -1,0 +1,11 @@
+[package]
+name = "atag"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "no_std helpers for deriving rotating Find My advertisement keys and BLE payloads"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+p224 = { version = "0.13.2", default-features = false, features = ["arithmetic"] }
+sha2 = { version = "0.10.9", default-features = false }

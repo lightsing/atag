@@ -1,0 +1,40 @@
+[package]
+name = "atag-agent"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+description = "Cross-platform local HTTP agent for ATAG"
+
+[dependencies]
+axum = "0.8.9"
+base64 = "0.22.1"
+chrono = { version = "0.4.42", features = ["clock"] }
+clap = { version = "4.5.60", features = ["derive", "env"] }
+dirs = "6.0.0"
+anyhow = "1"
+libc = "0.2"
+region = "3.0"
+fs2 = "0.4.3"
+futures-util = { version = "0.3", features = ["sink"] }
+plist = "1.7"
+rand_core = { version = "0.6.4", features = ["getrandom", "std"] }
+reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10.9"
+tempfile = "3.27.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time", "process", "io-util", "fs"] }
+tokio-tungstenite = { version = "0.28.0", features = ["rustls-tls-webpki-roots"] }
+zip = { version = "2.4", default-features = false, features = ["deflate"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.3"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSBundle", "NSString", "NSDictionary", "NSObject", "NSLocale"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Memory", "Win32_System_Diagnostics_Debug", "Win32_System_Threading"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
+tower = { version = "0.5", features = ["util"] }

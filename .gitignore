@@ -1,0 +1,69 @@
+# Private runtime state (keep locally; never commit)
+.ota/
+.findmy/
+
+# Local environment and signing credentials
+.env
+.env.*
+!.env.example
+!.env.sample
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.mobileprovision
+
+# Generated device bundles contain private keys and provisioning material
+*_devices.json
+*.atag-config.bin
+*.private-key.bin
+*.master-private-key.bin
+*.symmetric-seed.bin
+*.provisioning-record.bin
+*.advertisement-key.bin
+*.master-public-key.bin
+*.manifest.txt
+atag-backup-*.json
+*.atag-ota
+
+# Installed dependencies and language caches
+.venv/
+venv/
+node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Generated build, release and test output
+target/
+.build-host/
+production/
+test-artifacts/
+coverage/
+.coverage
+.coverage.*
+htmlcov/
+*.log
+
+# Xcode build output and per-user state
+DerivedData/
+*.xcarchive/
+*.xcresult/
+*.ipa
+*.dSYM/
+xcuserdata/
+*.xcuserstate
+
+# OS metadata and editor temporary files
+.DS_Store
+._*
+Thumbs.db
+*.swp
+*.swo
+*~

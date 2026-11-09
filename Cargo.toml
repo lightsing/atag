@@ -1,0 +1,9 @@
+[workspace]
+resolver = "3"
+members = ["atag", "firmware-nrf52832", "bootloader-nrf52832", "tools/atagctl", "tools/atag-agent"]
+
+[profile.release]
+codegen-units = 1
+debug = 2
+lto = true
+opt-level = "s"

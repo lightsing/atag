@@ -1,0 +1,257 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "../vendor/shadcn-tailwind-4.13.0.css";
+
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@utility scrollbar-gutter-stable {
+  scrollbar-gutter: stable;
+}
+
+/*
+ * ATAG palette: warm paper base, ink text, persimmon accent.
+ * Light only — map tiles are light and a half-done dark theme hurts contrast.
+ */
+:root {
+  --paper: #f3efe7;
+  --paper-deep: #e9e3d8;
+  --ink: #1f1c18;
+  --ink-soft: #5f584e;
+  --ink-faint: #8a8276;
+  --line: #e2dbcf;
+  --persimmon: #e0531f;
+  --persimmon-ink: #b23f12;
+  --persimmon-wash: #fbe7dc;
+  --ok: #2b7a57;
+  --ok-wash: #e1f1e8;
+  --warn: #9a6a12;
+  --warn-wash: #f8eccf;
+  --danger: #b42318;
+  --danger-wash: #fbe4e1;
+
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: #fffdf9;
+  --card-foreground: var(--ink);
+  --popover: #fffdf9;
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: #fffdf9;
+  --secondary: #ebe5da;
+  --secondary-foreground: var(--ink);
+  --muted: #ece6dc;
+  --muted-foreground: var(--ink-soft);
+  --accent: #ece6dc;
+  --accent-foreground: var(--ink);
+  --destructive: var(--danger);
+  --border: var(--line);
+  --input: #d8d0c2;
+  --ring: var(--persimmon);
+  --chart-1: var(--persimmon);
+  --chart-2: #2f6f5e;
+  --chart-3: #3b5bdb;
+  --chart-4: #9c36b5;
+  --chart-5: #b7791f;
+  --radius: 0.75rem;
+  --sidebar: var(--paper);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--ink);
+  --sidebar-primary-foreground: #fffdf9;
+  --sidebar-accent: #ece6dc;
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--persimmon);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-paper: var(--paper);
+  --color-paper-deep: var(--paper-deep);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-ink-faint: var(--ink-faint);
+  --color-line: var(--line);
+  --color-persimmon: var(--persimmon);
+  --color-persimmon-ink: var(--persimmon-ink);
+  --color-persimmon-wash: var(--persimmon-wash);
+  --color-ok: var(--ok);
+  --color-ok-wash: var(--ok-wash);
+  --color-warn: var(--warn);
+  --color-warn-wash: var(--warn-wash);
+  --color-danger: var(--danger);
+  --color-danger-wash: var(--danger-wash);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: "PingFang SC", "HarmonyOS Sans SC", "Noto Sans SC", "Microsoft YaHei", -apple-system,
+    BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+:focus-visible {
+  outline: 2px solid var(--persimmon);
+  outline-offset: 2px;
+}
+
+/* ---------- Leaflet surface ---------- */
+
+.atag-map.leaflet-container {
+  background: var(--paper-deep);
+  font-family: var(--font-sans);
+}
+
+.atag-map .leaflet-control-attribution {
+  background: rgb(255 253 249 / 0.82);
+  color: var(--ink-soft);
+  font-size: 10px;
+  border-radius: 6px 0 0 0;
+  padding: 1px 6px;
+}
+
+.atag-map .leaflet-control-attribution a {
+  color: var(--ink-soft);
+}
+
+.atag-map .leaflet-tile-pane {
+  filter: saturate(0.72) sepia(0.08) contrast(0.98);
+}
+
+.atag-pin {
+  position: relative;
+  width: 34px;
+  height: 34px;
+}
+
+.atag-pin__dot {
+  position: absolute;
+  inset: 7px;
+  border-radius: 9999px;
+  background: var(--pin-color);
+  border: 3px solid #fffdf9;
+  box-shadow: 0 2px 8px rgb(31 28 24 / 0.32);
+  transition: transform 160ms ease;
+}
+
+.atag-pin--stale .atag-pin__dot {
+  background: #fffdf9;
+  border-color: var(--pin-color);
+  border-width: 4px;
+}
+
+.atag-pin--selected .atag-pin__dot {
+  transform: scale(1.18);
+}
+
+.atag-pin--selected::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: var(--pin-color);
+  opacity: 0.22;
+  animation: atag-pulse 2.4s ease-out infinite;
+}
+
+.atag-pin__label {
+  position: absolute;
+  left: 50%;
+  top: 36px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  background: rgb(255 253 249 / 0.94);
+  border: 1px solid var(--line);
+  border-radius: 9999px;
+  padding: 1px 8px;
+  box-shadow: 0 1px 3px rgb(31 28 24 / 0.12);
+  pointer-events: none;
+}
+
+.atag-trackpoint {
+  border-radius: 9999px;
+}
+
+@keyframes atag-pulse {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.35;
+  }
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .atag-pin--selected::before {
+    animation: none;
+    opacity: 0.18;
+  }
+}
