@@ -2,7 +2,7 @@
 use crate::error::ApiError;
 use std::{
     fs::{self, File},
-    io::Read,
+    io::{Read, Write},
     path::Path,
 };
 
@@ -14,6 +14,16 @@ pub fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, ApiError> {
         return Err(ApiError::invalid("文件超过大小限制。"));
     }
     Ok(data)
+}
+
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ApiError> {
+    reject_symlink(path)?;
+    let mut file = tempfile::NamedTempFile::new_in(path.parent().ok_or_else(ApiError::internal)?)?;
+    protect(file.path(), false)?;
+    file.write_all(bytes)?;
+    file.as_file().sync_all()?;
+    file.persist(path).map_err(|_| ApiError::internal())?;
+    Ok(())
 }
 
 pub fn prepare_private_directory(path: &Path) -> Result<(), ApiError> {

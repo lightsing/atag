@@ -1,0 +1,14 @@
+[package]
+name = "atag-coreadi-worker"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+license = "GPL-2.0-only"
+description = "Isolated macOS CoreADI emulator for the ATAG agent"
+
+[dependencies]
+adi-core = { git = "https://github.com/sacca97/os-findmy-e.git", rev = "d4d2a832baf47d1cf43d989879950ac2aec45f47" }
+base64 = "0.22.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

@@ -2,6 +2,7 @@
 //! no Apple account credentials or accessory private keys.
 pub mod local;
 mod mac_coreadi;
+mod mid_service;
 mod remote_v3;
 use crate::{error::ApiError, now};
 use base64::{Engine, engine::general_purpose::STANDARD};
@@ -168,12 +169,10 @@ impl AnisetteProvider {
 
 pub fn install_mac_coreadi(
     directory: &std::path::Path,
-    python: &std::path::Path,
-    emulator: &std::path::Path,
     library: &std::path::Path,
     machine: Option<&std::path::Path>,
 ) -> Result<(), ApiError> {
-    mac_coreadi::install(directory, python, emulator, library, machine)
+    mac_coreadi::install(directory, library, machine)
 }
 
 fn normalize(

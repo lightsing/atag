@@ -18,6 +18,7 @@ ATAG 包含 Find My 广播算法、nRF52832 固件与 OTA bootloader、浏览器
 | `web/` | 浏览器工作区、Apple 登录、地图和 Web Bluetooth |
 | `ios/` | 原生 iPhone App，直连 Apple 查询自己的 ATAG 最后位置 |
 | `tools/atag-agent/` | Anisette 与固定 Apple endpoint 的本地桥接 |
+| `tools/atag-coreadi-worker/` | 独立运行 macOS CoreADI 的 Rust 子进程 |
 | `tools/atagctl/` | 配置包、密钥和出厂 profile 生成 |
 | `tools/gatt/` | 当前 GATT 管理 CLI 与设置编解码 |
 | `tools/ota/` | 签名构建与蓝牙上传 |
@@ -70,7 +71,7 @@ rustup target add thumbv7em-none-eabihf
 
 ```sh
 cargo test --workspace --locked
-cargo clippy -p atag-agent --all-targets --locked -- -D warnings
+cargo clippy -p atag-agent -p atag-coreadi-worker --all-targets --locked -- -D warnings
 cargo fmt --all --check
 .venv/bin/python -m unittest discover -s tools/gatt -v
 .venv/bin/python -m unittest discover -s tools/findmy -v

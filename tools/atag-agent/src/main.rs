@@ -37,14 +37,8 @@ enum Command {
 
 #[derive(Subcommand)]
 enum AnisetteCommand {
-    /// Install the verified emulator and optionally import an existing machine registration.
+    /// Install the verified CoreADI library and optionally import an existing machine registration.
     InstallMacCoreadi {
-        /// Python executable with Unicorn installed.
-        #[arg(long)]
-        python: PathBuf,
-        /// Pinned os-findmy-e tools/machoadi directory.
-        #[arg(long)]
-        emulator: PathBuf,
         /// Verified x86_64 slice extracted from Apple's iTunes package.
         #[arg(long)]
         library: PathBuf,
@@ -84,15 +78,9 @@ async fn run(cli: Cli) -> Result<(), ApiError> {
     match cli.command {
         Command::AnisetteWorker { backend } => local::worker(&directory, &backend).await,
         Command::Anisette {
-            command:
-                AnisetteCommand::InstallMacCoreadi {
-                    python,
-                    emulator,
-                    library,
-                    machine,
-                },
+            command: AnisetteCommand::InstallMacCoreadi { library, machine },
         } => {
-            install_mac_coreadi(&directory, &python, &emulator, &library, machine.as_deref())?;
+            install_mac_coreadi(&directory, &library, machine.as_deref())?;
             println!(
                 "macOS CoreADI runtime installed. Run anisette init to verify machine provisioning."
             );

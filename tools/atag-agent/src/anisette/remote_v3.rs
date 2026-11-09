@@ -1,5 +1,6 @@
 //! SideStore's v3 protocol: a separate machine identity, with no Apple account data.
 //! Protocol reference: SideStore/apple-private-apis, omnisette/remote_anisette_v3.rs.
+use super::mid_service::{LOOKUP, apple_url, plist_field};
 use super::{apple_http_client, bounded_body, http_client, local, network_error};
 use crate::{error::ApiError, hex, now, private_files};
 use base64::{Engine, engine::general_purpose::STANDARD};
@@ -20,7 +21,6 @@ use tokio_tungstenite::{
 };
 
 const SERVER: &str = "https://new.ani.sidestore.io";
-const LOOKUP: &str = "https://gsa.apple.com/grandslam/GsService2/lookup";
 const LIMIT: usize = 64 * 1024;
 const SIDESTORE_LEGACY_CLIENT: &str =
     "<MacBookPro13,3> <Mac OS X;10.12.6;16G29> <com.apple.AuthKit/1 (com.apple.akd/1.0)>";
@@ -224,28 +224,6 @@ fn validate_blob(blob: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-// Lookup URLs are Apple responses, not instructions from the Anisette server.
-// Nevertheless constrain them before sending any provisioning material.
-fn apple_url(url: &str) -> Result<Url, ApiError> {
-    let url = Url::parse(url).map_err(|_| failure("Apple 机器注册地址无效。"))?;
-    if url.scheme() != "https"
-        || url.host_str() != Some("gsa.apple.com")
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.fragment().is_some()
-        || url.port_or_known_default() != Some(443)
-    {
-        return Err(failure("Apple 机器注册地址不受支持。"));
-    }
-    Ok(url)
-}
-fn plist_field<'a>(value: &'a plist::Value, name: &str) -> Result<&'a str, ApiError> {
-    value
-        .as_dictionary()
-        .and_then(|d| d.get(name))
-        .and_then(plist::Value::as_string)
-        .ok_or_else(|| failure("Apple 机器注册响应缺少必要字段。"))
-}
 async fn apple_plist(request: RequestBuilder) -> Result<plist::Value, ApiError> {
     plist::Value::from_reader(Cursor::new(response_bytes(request).await?))
         .map_err(|_| failure("Apple 机器注册响应无效。"))

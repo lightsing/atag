@@ -19,11 +19,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: cargo fmt --package atag-agent --check
-      - run: cargo test -p atag-agent -p atag --locked
+      - run: cargo fmt --package atag-agent --package atag-coreadi-worker --check
+      - run: cargo build -p atag-coreadi-worker --locked
+      - run: cargo test -p atag-agent -p atag-coreadi-worker -p atag --locked
       - run: npm ci --prefix web
       - run: node tools/atag-agent/tests/bridge-client-smoke.mjs
-      - run: cargo clippy -p atag-agent --all-targets --locked -- -D warnings
+      - run: cargo clippy -p atag-agent -p atag-coreadi-worker --all-targets --locked -- -D warnings
   msrv:
     runs-on: ubuntu-latest
     steps:
@@ -31,4 +32,4 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: '1.85'
-      - run: cargo check -p atag-agent --locked
+      - run: cargo check -p atag-agent -p atag-coreadi-worker --locked

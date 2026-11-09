@@ -18,17 +18,20 @@ cargo run -p atag-agent -- serve --allow-origin https://atag-hhq.flutedbrink.cha
 
 ## Anisette
 
-新登录默认使用“模拟 macOS（默认）” (`mac-coreadi`)。Agent 在独立的 Python 子进程中用 Unicorn 运行 Apple 的 x86_64 CoreADI。首次部署需准备装有 `unicorn==2.1.4` 的 Python 虚拟环境、[固定版本的模拟器](https://github.com/sacca97/os-findmy-e/tree/d4d2a832baf47d1cf43d989879950ac2aec45f47/tools/machoadi)，以及从 [Apple iTunes 12.8.3](https://support.apple.com/en-us/106374) 安装包提取的 `CoreADI.x86_64`。该版本上游的 `tools/fetch_mac_coreadi.py` 可用 `curl` 和 `7z` 下载并提取运行库。Agent 安装时验证文件哈希：
+新登录默认使用“模拟 macOS（默认）” (`mac-coreadi`)。Agent 通过独立的 Rust 进程 `atag-coreadi-worker` 使用 Unicorn 执行 Apple 的 x86_64 CoreADI。源码构建需要 C/C++ 工具链、CMake 和 libclang。部署时将两个可执行文件放在同一目录。
+
+首次安装需准备 `CoreADI.x86_64`。在 macOS 上可以用 `pkgutil --expand-full` 解包 iTunes 安装器，从 `CoreADI.pkg/Payload` 下的 `System/Library/PrivateFrameworks/CoreADI.framework/Versions/A/CoreADI` 用 `lipo -thin x86_64` 提取切片。Agent 安装时校验 SHA-256。[Apple iTunes 12.8.3 安装包](https://support.apple.com/en-us/106374)
 
 ```sh
+cargo build --locked -p atag-agent -p atag-coreadi-worker
 cargo run -p atag-agent --locked -- anisette install-mac-coreadi \
-  --python /path/to/venv/bin/python \
-  --emulator /path/to/os-findmy-e/tools/machoadi \
   --library /path/to/CoreADI.x86_64
 cargo run -p atag-agent --locked -- anisette init
 ```
 
-若已有同版本模拟器注册的机器，可在安装时加 `--machine /path/to/machine`。初始化会验证缓存，或通过 Apple 注册新的机器。后续请求复用 `anisette/mac-coreadi/machine` 的机器标识和注册材料；无需访问 SideStore，也不接收或保存 Apple 账号资料。客户端类型固定与模拟机器一致。
+升级时可直接使用原数据目录中的 CoreADI 和 `anisette/mac-coreadi/machine`。从其他目录导入时，在安装命令中加 `--machine /path/to/machine`。`anisette init` 会验证已有缓存，或通过 Apple 注册新的机器。后续请求复用机器标识和注册材料，客户端类型与模拟机器一致。
+
+`atag-coreadi-worker` 独立链接 `adi-core` 和 Unicorn，按 GPL-2.0-only 提供。[上游 `adi-core`](https://github.com/sacca97/os-findmy-e/tree/d4d2a832baf47d1cf43d989879950ac2aec45f47/native/adi-core) · [Worker 许可证](../atag-coreadi-worker/LICENSE)
 
 网页仍可显式选择“本机系统” (`local`)、便携运行库 (`portable`) 或远端来源；已保存的查询会话继续使用其原有来源。`anisette init --system` 在 macOS 使用系统后端，其他平台使用便携运行库；`anisette init --portable` 强制使用便携运行库，可加 `--repair` 重新下载其运行库并保留机器身份。
 
@@ -74,9 +77,9 @@ agent 的失败日志仅包含失败环节、固定 Apple endpoint、HTTP 状态
 ## 检查
 
 ```sh
-cargo test -p atag-agent --locked
-cargo clippy -p atag-agent --all-targets --locked -- -D warnings
-cargo fmt --package atag-agent --check
+cargo test -p atag-agent -p atag-coreadi-worker --locked
+cargo clippy -p atag-agent -p atag-coreadi-worker --all-targets --locked -- -D warnings
+cargo fmt --package atag-agent --package atag-coreadi-worker --check
 node tools/atag-agent/tests/bridge-client-smoke.mjs
 ```
 

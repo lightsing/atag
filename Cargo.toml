@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["atag", "firmware-nrf52832", "bootloader-nrf52832", "tools/atagctl", "tools/atag-agent"]
+members = ["atag", "firmware-nrf52832", "bootloader-nrf52832", "tools/atagctl", "tools/atag-agent", "tools/atag-coreadi-worker"]
 
 [profile.release]
 codegen-units = 1
