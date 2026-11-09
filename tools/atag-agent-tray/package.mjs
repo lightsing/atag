@@ -95,7 +95,10 @@ ${mac ? "CLI 位于 ATAG Agent.app/Contents/MacOS/。\n" : ""}`);
   const file = `ATAG-Agent-${platform}-${process.arch}.${extension}`;
   const archive = join(stage, file);
   if (mac) run("ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", bundle, archive]);
-  else if (windows) run("tar.exe", ["-a", "-cf", archive, "-C", stage, name]);
+  else if (windows) run("powershell.exe", [
+    "-NoProfile", "-NonInteractive", "-Command",
+    "Compress-Archive -LiteralPath $env:ATAG_PACKAGE_SOURCE -DestinationPath $env:ATAG_PACKAGE_ARCHIVE -ErrorAction Stop",
+  ], { ...process.env, ATAG_PACKAGE_SOURCE: bundle, ATAG_PACKAGE_ARCHIVE: archive });
   else run("tar", ["-czf", archive, "-C", stage, name]);
   copyFileSync(archive, join(packagesDir, file));
   console.log(join(packagesDir, file));

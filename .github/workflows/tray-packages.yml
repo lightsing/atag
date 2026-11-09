@@ -7,6 +7,11 @@ on:
         description: ATAG website URL opened by the tray
         required: true
         type: string
+      runner:
+        description: Platform to package
+        type: choice
+        default: all
+        options: [all, macos-15, macos-15-intel, windows-2025, ubuntu-22.04]
 
 permissions:
   contents: read
@@ -16,11 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: macos-15, name: macos-arm64 }
-          - { os: macos-15-intel, name: macos-x64 }
-          - { os: windows-2025, name: windows-x64 }
-          - { os: ubuntu-22.04, name: linux-x64 }
+        os: ${{ inputs.runner == 'all' && fromJSON('["macos-15","macos-15-intel","windows-2025","ubuntu-22.04"]') || fromJSON(format('["{0}"]', inputs.runner)) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -35,6 +36,6 @@ jobs:
           ATAG_TRAY_WEB_URL: ${{ inputs.web_url }}
       - uses: actions/upload-artifact@v4
         with:
-          name: ATAG-Agent-${{ matrix.name }}
+          name: ATAG-Agent-${{ matrix.os }}
           path: target/packages/ATAG-Agent-*
           if-no-files-found: error
