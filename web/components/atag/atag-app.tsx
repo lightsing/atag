@@ -223,6 +223,7 @@ export function AtagApp() {
       onOpenNearby={() => openNearby()}
       onConfigure={() => openNearby("provision", selected.id)}
       onOpenBridgeSettings={() => openSettings(fetchReadiness.bridgeConnected ? "apple" : "bridge")}
+      queryRevision={session.reportsVersion}
       onLoadQuerySettings={session.getQuerySettings}
       onSaveQuerySettings={session.updateQuerySettings}
     />
@@ -366,6 +367,7 @@ export function AtagApp() {
         onOpenChange={setNearbyOpen}
         intent={nearbyIntent}
         devices={devices}
+        onObserveRotationTiming={storageOk ? session.observeRotationTiming : null}
         provisioning={{
           createBundle: storageOk ? session.createProvisioningBundle : null,
           getBundle: storageOk ? session.getProvisioningBundle : null,

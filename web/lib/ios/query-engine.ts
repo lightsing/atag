@@ -67,7 +67,7 @@ async function importTags(input: { text: string; password?: string }): Promise<T
 
 async function latest({ tag, saved }: { tag: Tag; saved: StoredAccount }): Promise<LocationReport | null> {
   const keys = tag.keys.kind === 'precomputed'
-    ? new Map(tag.keys.privateKeys.map(value => { const key = validatePrivate(value); return [base64(sha256(publicKey(key).slice(1, 29))), key] as const; }))
+    ? new Map(tag.keys.privateKeys.map(value => { const key = validatePrivate(value); return [base64(sha256(publicKey(key).slice(1, 29))), { privateKey: key }] as const; }))
     : await reportKeys(tag.keys, tag.query ?? {rotationStart: 1, rotationCount: 512});
   const ids = [...keys.keys()], now = Date.now(), to = new Date(now).toISOString(), from = new Date(now - 7 * 86400000).toISOString();
   // Compare the machine's identity with the one that received this token.
@@ -85,7 +85,7 @@ async function latest({ tag, saved }: { tag: Tag; saved: StoredAccount }): Promi
     const batch = await fetchFindMyCiphertexts(boundTransport, saved.account, saved.source, ids.slice(offset, offset + 256), from, to);
     for (const item of batch) {
       let report: LocationReport;
-      try { report = await decryptReport(tag.id, keys.get(item.id)!, unbase64(item.payload)); }
+      try { report = await decryptReport(tag.id, keys.get(item.id)!.privateKey, unbase64(item.payload)); }
       catch { throw new ClientError('UPSTREAM_UNAVAILABLE', '报告无法通过解密验证，请确认设备档案与标签一致。'); }
       if (report.observedAt >= from && report.observedAt <= to && (!result || result.observedAt < report.observedAt)) result = report;
     }

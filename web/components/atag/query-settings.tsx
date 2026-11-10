@@ -2,14 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { Loader2, SlidersHorizontal } from "lucide-react";
-import type { TagDevice } from "@/lib/contracts";
+import { absoluteTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { ROTATION_COUNT_MAX, ROTATION_START_MAX, type QuerySettingsView } from "@/lib/workspace/report-query";
+import type { QuerySettings } from "@/lib/workspace/types";
 import { Button } from "@/components/ui/button";
-import type { QuerySettings } from "./use-atag-session";
 import { errorText } from "./workspace-data";
-
-export const ROTATION_START_MAX = 10_000_000;
-export const ROTATION_COUNT_MAX = 4096;
 
 function parseBounded(text: string, max: number): number | null {
   if (!/^\d+$/.test(text.trim())) return null;
@@ -17,61 +15,67 @@ function parseBounded(text: string, max: number): number | null {
   return Number.isSafeInteger(n) && n >= 1 && n <= max ? n : null;
 }
 
-/**
- * Per-device query settings stored in this browser. Rotation is never inferred from the wall clock.
- * Mount with `key={device.id}` so state never carries over between devices.
- */
+/** Mount with `key={deviceId}` so form state never carries over between devices. */
 export function QuerySettingsSection({
-  device,
+  deviceId,
+  revision,
   onLoad,
   onSave,
 }: {
-  device: TagDevice;
-  onLoad(id: string): Promise<QuerySettings>;
+  deviceId: string;
+  revision: number;
+  onLoad(id: string): Promise<QuerySettingsView>;
   onSave(id: string, patch: Partial<QuerySettings>): Promise<void>;
 }) {
-  const [saved, setSaved] = useState<QuerySettings | null>(null);
+  const [saved, setSaved] = useState<QuerySettingsView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [start, setStart] = useState("");
-  const [count, setCount] = useState("");
+  const [modeDraft, setModeDraft] = useState<QuerySettings["rotationMode"]>();
+  const [startDraft, setStartDraft] = useState<string>();
+  const [countDraft, setCountDraft] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
-  const rotating = device.advertisingMode === "rotating";
 
   useEffect(() => {
     let cancelled = false;
-    onLoad(device.id).then(
+    onLoad(deviceId).then(
       (settings) => {
         if (cancelled) return;
         setSaved(settings);
-        setStart(String(settings.rotationStart));
-        setCount(String(settings.rotationCount));
+        setLoadError(null);
       },
       (err) => !cancelled && setLoadError(errorText(err, "无法读取查询设置。")),
     );
     return () => {
       cancelled = true;
     };
-  }, [device.id, onLoad]);
+  }, [deviceId, onLoad, revision]);
 
+  const savedMode = saved?.rotationMode ?? "auto";
+  const mode = modeDraft ?? savedMode;
+  const start = startDraft ?? String(saved?.rotationStart ?? "");
+  const count = countDraft ?? String(saved?.rotationCount ?? "");
   const startValue = parseBounded(start, ROTATION_START_MAX);
   const countValue = parseBounded(count, ROTATION_COUNT_MAX);
-  const invalid = rotating && (startValue === null || countValue === null);
-  const dirty =
-    !!saved &&
-    (rotating && (startValue !== saved.rotationStart || countValue !== saved.rotationCount));
+  const invalid = mode === "manual" && (startValue === null || countValue === null);
+  const dirty = !!saved && (mode !== savedMode ||
+    (mode === "manual" && (startValue !== saved.rotationStart || countValue !== saved.rotationCount)));
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!saved || invalid || !dirty) return;
-    const patch: Partial<QuerySettings> = {};
-    if (rotating && startValue !== null && startValue !== saved.rotationStart) patch.rotationStart = startValue;
-    if (rotating && countValue !== null && countValue !== saved.rotationCount) patch.rotationCount = countValue;
+    const patch: Partial<QuerySettings> = { rotationMode: mode };
+    if (mode === "manual" && startValue !== null && countValue !== null) {
+      patch.rotationStart = startValue;
+      patch.rotationCount = countValue;
+    }
     setBusy(true);
     setMessage(null);
     try {
-      await onSave(device.id, patch);
-      setSaved({ ...saved, ...patch });
+      await onSave(deviceId, patch);
+      setSaved((latest) => latest && { ...latest, ...patch });
+      setModeDraft(undefined);
+      setStartDraft(undefined);
+      setCountDraft(undefined);
       setMessage({ tone: "ok", text: "已保存到此浏览器，下次刷新报告时生效。" });
     } catch (err) {
       setMessage({ tone: "error", text: errorText(err, "保存失败。") });
@@ -81,8 +85,8 @@ export function QuerySettingsSection({
   };
 
   return (
-    <section aria-labelledby={`query-${device.id}`} className="mt-5 px-4">
-      <h3 id={`query-${device.id}`} className="flex items-center gap-1.5 text-sm font-semibold text-ink">
+    <section aria-labelledby={`query-${deviceId}`} className="mt-5 px-4">
+      <h3 id={`query-${deviceId}`} className="flex items-center gap-1.5 text-sm font-semibold text-ink">
         <SlidersHorizontal className="size-4 text-ink-faint" /> 报告查询设置
       </h3>
       <form onSubmit={save} className="mt-2 space-y-3 rounded-2xl border border-line bg-card px-3.5 py-3 text-[13px]">
@@ -94,7 +98,29 @@ export function QuerySettingsSection({
           </p>
         ) : (
           <>
-            {rotating && (
+            <label className="grid gap-1">
+              <span className="font-medium">密钥查询范围</span>
+              <select
+                value={mode}
+                onChange={(e) => {
+                  setModeDraft(e.target.value === "manual" ? "manual" : "auto");
+                  setMessage(null);
+                }}
+                disabled={busy}
+                className="h-9 rounded-lg border border-input bg-background px-2.5 text-sm"
+              >
+                <option value="auto">自动推算</option>
+                <option value="manual">手动指定</option>
+              </select>
+            </label>
+            {saved.intervalMinutes !== null && (
+              <p className="text-[12px] text-ink-soft">
+                轮换周期：{saved.intervalMinutes} 分钟（{saved.intervalFromTag ? "Tag 最近确认" : "建档设置"}）
+              </p>
+            )}
+            {mode === "auto" ? (
+              <AutomaticRange settings={saved} />
+            ) : (
               <div className="grid gap-2">
                 <div className="grid grid-cols-2 gap-2">
                   <label className="grid gap-1">
@@ -102,7 +128,7 @@ export function QuerySettingsSection({
                     <input
                       inputMode="numeric"
                       value={start}
-                      onChange={(e) => setStart(e.target.value)}
+                      onChange={(e) => { setStartDraft(e.target.value); setMessage(null); }}
                       disabled={busy}
                       aria-invalid={startValue === null}
                       className={cn(
@@ -116,7 +142,7 @@ export function QuerySettingsSection({
                     <input
                       inputMode="numeric"
                       value={count}
-                      onChange={(e) => setCount(e.target.value)}
+                      onChange={(e) => { setCountDraft(e.target.value); setMessage(null); }}
                       disabled={busy}
                       aria-invalid={countValue === null}
                       className={cn(
@@ -127,7 +153,7 @@ export function QuerySettingsSection({
                   </label>
                 </div>
                 <p className={cn("text-[12px] leading-relaxed", invalid ? "text-danger" : "text-ink-faint")}>
-                  起始序号 1–{ROTATION_START_MAX.toLocaleString("en-US")}，密钥数 1–{ROTATION_COUNT_MAX}。刷新时从起始序号起依次查询这些滚动密钥；网页不会按当前时间推算序号。可参考附近管理遥测中的轮换计数调整。
+                  起始序号 1–{ROTATION_START_MAX.toLocaleString("en-US")}，密钥数 1–{ROTATION_COUNT_MAX}。可参考「附近管理」中的当前轮换计数。
                 </p>
               </div>
             )}
@@ -146,5 +172,28 @@ export function QuerySettingsSection({
         )}
       </form>
     </section>
+  );
+}
+
+function AutomaticRange({ settings }: { settings: QuerySettingsView }) {
+  const { estimate } = settings;
+  const range = estimate ?? settings;
+  return (
+    <div className="space-y-1 rounded-lg bg-muted px-2.5 py-2">
+      <p className="font-medium tabular-nums text-ink">
+        {estimate ? "预计查询" : "暂用范围"} {range.rotationStart}–{range.rotationStart + range.rotationCount - 1} 轮（{range.rotationCount} 把密钥）
+      </p>
+      {estimate ? (
+        <p className="text-[12px] leading-relaxed text-ink-soft">
+          预计当前第 {estimate.estimatedRotation} 轮。依据{estimate.anchor.source === "tag" ? " Tag 读数" : "已解密报告"}：
+          {absoluteTime(estimate.anchor.observedAt)} 第 {estimate.anchor.rotation} 轮。刷新时会重新计算。
+          {estimate.limited && " 查询范围已达上限，可手动调整。"}
+        </p>
+      ) : (
+        <p className="text-[12px] leading-relaxed text-ink-soft">
+          收到带轮次的报告或在「附近管理」读取已绑定的 Tag 后，会自动推算范围。
+        </p>
+      )}
+    </div>
   );
 }

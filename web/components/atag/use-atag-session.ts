@@ -16,7 +16,8 @@ import {
   validateAgentBaseUrl,
 } from "@/lib/client-support";
 import type { BridgeHealth } from "@/lib/agent/bridge-client";
-import type { QuerySettings, WorkspaceStats, BackupSummary as BackupPreview } from "@/lib/workspace/types";
+import type { QuerySettingsView } from "@/lib/workspace/report-query";
+import type { QuerySettings, RotationTiming, WorkspaceStats, BackupSummary as BackupPreview } from "@/lib/workspace/types";
 export type { QuerySettings, WorkspaceStats, BackupSummary as BackupPreview } from "@/lib/workspace/types";
 import type { AppleLoginInput, AppleLoginSnapshot } from "@/lib/auth/apple-login";
 import { BrowserWorkspaceClient } from "@/lib/workspace/browser-workspace-client";
@@ -69,7 +70,7 @@ export interface AtagSession {
   devicesState: LoadState;
   devicesError: ClientError | null;
   refreshTasks: Record<string, RefreshTask>;
-  /** Bumps when reports for a device may have changed (refresh finished, restore, import). */
+  /** Bumps when saved reports or rotation timing may have changed. */
   reportsVersion: number;
   connectBridge(url?: string): Promise<boolean>;
   cancelBridgeConnect(): void;
@@ -89,8 +90,9 @@ export interface AtagSession {
   cancelAppleLogin(): void;
   /** Removes only the query session; devices, keys and reports stay. */
   logoutApple(): Promise<void>;
-  getQuerySettings(id: string): Promise<QuerySettings>;
+  getQuerySettings(id: string): Promise<QuerySettingsView>;
   updateQuerySettings(id: string, patch: Partial<QuerySettings>): Promise<void>;
+  observeRotationTiming(serial: string, timing: RotationTiming): Promise<void>;
   /** Generates keys locally and persists the draft profile before returning the transient package. */
   createProvisioningBundle(input: ProvisioningBundleRequest): Promise<ProvisioningBundle>;
   /** Rebuilds the saved profile's configuration package; never generates new keys. */
@@ -385,6 +387,10 @@ export function useAtagSession(): AtagSession {
     [requireWorkspace],
   );
 
+  const observeRotationTiming = useCallback(async (serial: string, timing: RotationTiming) => {
+    if (await requireWorkspace().observeRotationTiming(serial, timing)) setReportsVersion((n) => n + 1);
+  }, [requireWorkspace]);
+
   const createProvisioningBundle = useCallback(
     async (input: ProvisioningBundleRequest) => {
       const bundle = await requireWorkspace().createProvisioningBundle(input);
@@ -477,6 +483,7 @@ export function useAtagSession(): AtagSession {
     logoutApple,
     getQuerySettings,
     updateQuerySettings,
+    observeRotationTiming,
     createProvisioningBundle,
     getProvisioningBundle,
     listWorkspaceDevices,

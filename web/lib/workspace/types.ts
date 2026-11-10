@@ -1,6 +1,12 @@
 import type { LocationReport, TagDevice } from '../contracts';
 
-export interface QuerySettings { rotationStart: number; rotationCount: number }
+export interface QueryWindow { rotationStart: number; rotationCount: number }
+export interface QuerySettings extends QueryWindow { rotationMode?: 'auto' | 'manual' }
+export interface RotationTiming {
+  rotation: number;
+  observedAt: string;
+  intervalMinutes: number;
+}
 export type KeyMaterial =
   | { kind: 'fixed'; privateKey: string }
   | { kind: 'rotating'; masterPrivateKey: string; symmetricSeed: string };
@@ -8,6 +14,8 @@ export interface WorkspaceRecord {
   device: TagDevice;
   keys: KeyMaterial;
   query: QuerySettings;
+  /** Most recent reading of the running Tag, separate from its configuration package. */
+  rotationTiming?: RotationTiming;
   reports: LocationReport[];
   provisioning: 'draft' | 'confirmed';
 }

@@ -18,6 +18,8 @@ export interface LocationReport {
   id: string;
   deviceId: string;
   observedAt: string;
+  /** Rolling key round that decrypted this report, when recorded by the client. */
+  rotation?: number;
   latitude: number;
   longitude: number;
   horizontalAccuracyMeters: number;

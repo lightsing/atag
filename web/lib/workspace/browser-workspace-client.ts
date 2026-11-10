@@ -5,7 +5,8 @@ import { discoverBridge } from '../agent/discovery.ts';
 import { IndexedDbWorkspaceStore,type WorkspaceStore } from './store.ts';
 import { base64,generateMaterial,makeConfiguration,reportKeys,decryptReport,unbase64 } from './crypto.ts';
 import { exportEncryptedBackup,openEncryptedBackup,mergeRecords,stats,validateWorkspace } from './backup.ts';
-import { type QuerySettings,type WorkspaceRecord } from './types.ts';
+import { estimateRotation, querySettingsView, REPORT_LOOKBACK_MS, type QuerySettingsView } from './report-query.ts';
+import type { QuerySettings, RotationTiming, WorkspaceRecord } from './types.ts';
 import {BrowserAppleLogin,type AppleLoginInput} from '../auth/apple-login.ts';
 import {BUILTIN_ANISETTE_SOURCES,DEFAULT_ANISETTE_SOURCE} from '../preferences.ts';
 
@@ -75,13 +76,45 @@ export class BrowserWorkspaceClient implements WorkspaceClient {
     await this.store.update(data=>{signalCheck(signal);data.records.push({device,keys,query:{rotationStart:1,rotationCount:512},reports:[],provisioning:'draft'});validateWorkspace(data);});
     return {deviceId:id,mode:input.mode,rotationIntervalMinutes:interval,configurationBase64:base64(bytes)};
   }
-  async confirmProvisioning(id:string,serial:string|null,firmwareVersion?:string|null){await this.store.update(data=>{const record=find(data.records,id);if(record.device.chipSerial&&serial&&record.device.chipSerial!==serial.toLowerCase())throw new Error('档案已绑定其他 Tag，未改变绑定。');record.provisioning='confirmed';record.device.chipSerial=serial?.toLowerCase()??record.device.chipSerial??null;record.device.firmwareVersion=firmwareVersion??record.device.firmwareVersion;validateWorkspace(data);});}
+  async confirmProvisioning(id: string, serial: string | null, firmwareVersion?: string | null) {
+    await this.store.update(data => {
+      const record = find(data.records, id);
+      if (record.device.chipSerial && serial && record.device.chipSerial !== serial.toLowerCase()) {
+        throw new Error('档案已绑定其他 Tag，未改变绑定。');
+      }
+      record.provisioning = 'confirmed';
+      record.device.chipSerial = serial?.toLowerCase() ?? record.device.chipSerial ?? null;
+      record.device.firmwareVersion = firmwareVersion ?? record.device.firmwareVersion;
+      // Applying a package replaces the active interval with the one from the profile.
+      delete record.rotationTiming;
+      validateWorkspace(data);
+    });
+  }
   async getProvisioningBundle(id:string):Promise<ProvisioningBundle>{
     const record=find((await this.store.read()).records,id);
     return {deviceId:id,mode:record.device.advertisingMode,rotationIntervalMinutes:record.device.rotationIntervalMinutes,configurationBase64:base64(makeConfiguration(record.keys,record.device.rotationIntervalMinutes))};
   }
-  async getQuerySettings(id:string):Promise<QuerySettings>{return find((await this.store.read()).records,id).query;}
+  async getQuerySettings(id: string): Promise<QuerySettingsView> {
+    const record = find((await this.store.read()).records, id);
+    return querySettingsView(record, Date.now());
+  }
   async updateQuerySettings(id:string,patch:Partial<QuerySettings>){await this.store.update(data=>{const record=find(data.records,id);record.query={...record.query,...patch};validateWorkspace(data);});}
+  async observeRotationTiming(serial: string, timing: RotationTiming): Promise<boolean> {
+    const observedAt = Date.parse(timing.observedAt);
+    const now = Date.now();
+    if (!Number.isFinite(observedAt) || observedAt > now || !Number.isInteger(timing.rotation) ||
+        timing.rotation < 1 || timing.rotation > 0xffffffff || !Number.isInteger(timing.intervalMinutes) ||
+        timing.intervalMinutes < 1 || timing.intervalMinutes > 0xffffffff) return false;
+    const normalizedSerial = serial.toLowerCase();
+    return this.store.update(data => {
+      const record = data.records.find(item => item.device.chipSerial === normalizedSerial);
+      if (!record || record.keys.kind !== 'rotating') return false;
+      const previous = Date.parse(record.rotationTiming?.observedAt ?? '');
+      if (previous >= observedAt && previous <= now) return false;
+      record.rotationTiming = { ...timing, observedAt: new Date(observedAt).toISOString() };
+      return true;
+    });
+  }
   async refreshReports(id:string,signal?:AbortSignal):Promise<WorkspaceOperation>{
     signalCheck(signal);const pending=[...this.#operations.values()].find(o=>o.deviceId===id&&(o.status==='queued'||o.status==='running'));if(pending)return structuredClone(pending);
     const bridge=this.#bridge;if(!bridge)throw new ClientError('AGENT_UNAVAILABLE','获取新报告需要连接本地桥接。档案、已有报告与密钥仍保存在此浏览器。');
@@ -90,17 +123,47 @@ export class BrowserWorkspaceClient implements WorkspaceClient {
     for(const [key,op]of this.#operations)if(this.#operations.size>=256&&!['running','queued'].includes(op.status))this.#operations.delete(key);
     this.#operations.set(operation.id,operation);
     void(async()=>{try{
-      const keys=await reportKeys(record.keys,record.query,signal);const ids=[...keys.keys()];const to=new Date().toISOString(),from=new Date(Date.now()-7*86400000).toISOString();
+      const now = Date.now();
+      const from = new Date(now - REPORT_LOOKBACK_MS).toISOString();
+      const to = new Date(now).toISOString();
+      const estimate = record.query.rotationMode === 'manual' ? null : estimateRotation(record, now);
+      const keys = await reportKeys(record.keys, estimate ?? record.query, signal);
+      const ids = [...keys.keys()];
       const collected=new Map<string,Awaited<ReturnType<typeof decryptReport>>>();
       for(let i=0;i<ids.length;i+=256){
         signalCheck(signal);if(generation!==this.#generation)throw new ClientError('CANCELLED');
         const batch=ids.slice(i,i+256);const accepted=new Set(batch);const raw=await bridge.fetchCiphertexts(data.account!,data.anisetteUrl,batch,from,to,signal);
-        for(const report of raw){if(!accepted.has(report.id))continue;const decoded=await decryptReport(id,keys.get(report.id)!,unbase64(report.payload));
-          if(decoded.observedAt>=from&&decoded.observedAt<=to)collected.set(decoded.id,decoded);
-          if(collected.size>20000)throw new Error('报告数量超出限制。');}
+        for (const report of raw) {
+          if (!accepted.has(report.id)) continue;
+          const key = keys.get(report.id)!;
+          const decoded = await decryptReport(id, key.privateKey, unbase64(report.payload));
+          if (decoded.observedAt < from || decoded.observedAt > to) continue;
+          if (key.rotation !== undefined) decoded.rotation = key.rotation;
+          collected.set(decoded.id, decoded);
+          if (collected.size > 20000) throw new Error('报告数量超出限制。');
+        }
       }
       signalCheck(signal);if(generation!==this.#generation)throw new ClientError('CANCELLED');
-      const count=await this.store.update(current=>{const target=find(current.records,id);const byId=new Map(target.reports.map(r=>[r.id,r]));let added=0;for(const report of collected.values())if(!byId.has(report.id)){byId.set(report.id,report);added++;}target.reports=[...byId.values()].sort(reportOrder).slice(0,20000);target.device.latestReport=target.reports[0]??null;return added;});
+      const count = await this.store.update(current => {
+        signalCheck(signal);
+        if (generation !== this.#generation) throw new ClientError('CANCELLED');
+        const target = find(current.records, id);
+        const byId = new Map(target.reports.map(report => [report.id, report]));
+        let added = 0;
+        for (const report of collected.values()) {
+          const saved = byId.get(report.id);
+          if (!saved) {
+            byId.set(report.id, report);
+            added++;
+          } else if (saved.rotation === undefined && report.rotation !== undefined) {
+            // Refetching a legacy report recovers its round without counting it twice.
+            byId.set(report.id, { ...saved, rotation: report.rotation });
+          }
+        }
+        target.reports = [...byId.values()].sort(reportOrder).slice(0, 20000);
+        target.device.latestReport = target.reports[0] ?? null;
+        return added;
+      }, signal);
       operation.status='succeeded';operation.result={newReportCount:count};
     }catch(error){const normalized=toClientError(error);operation.status=normalized.code==='CANCELLED'?'cancelled':'failed';operation.error=normalized;
       if(normalized.code==='AUTH_EXPIRED')await this.store.update(current=>{if(current.account?.searchPartyToken===data.account?.searchPartyToken)current.accountExpired=true;}).catch(()=>{});}

@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import type { LocationReport, TagDevice } from "@/lib/contracts";
+import type { QuerySettingsView } from "@/lib/workspace/report-query";
 import {
   absoluteTime,
   formatAccuracy,
@@ -55,7 +56,8 @@ interface DeviceDetailProps {
   /** Open nearby provisioning with this saved profile preselected. */
   onConfigure(): void;
   onOpenBridgeSettings(): void;
-  onLoadQuerySettings(id: string): Promise<QuerySettings>;
+  queryRevision: number;
+  onLoadQuerySettings(id: string): Promise<QuerySettingsView>;
   onSaveQuerySettings(id: string, patch: Partial<QuerySettings>): Promise<void>;
 }
 
@@ -216,7 +218,10 @@ export function DeviceDetail(props: DeviceDetailProps) {
       <section aria-label="设备信息" className="mt-5 px-4">
         <h3 className="text-sm font-semibold text-ink">设备信息</h3>
         <dl className="mt-2 divide-y divide-line rounded-2xl border border-line bg-card text-[13px]">
-          <Row label="广播模式" value={formatRotation(device.advertisingMode, device.rotationIntervalMinutes)} />
+          <Row label="广播模式" value={formatRotation(device.advertisingMode, null)} />
+          {device.rotationIntervalMinutes !== null && (
+            <Row label="建档轮换周期" value={`${device.rotationIntervalMinutes} 分钟`} />
+          )}
           {device.provisioningState && (
             <Row
               label="配置状态"
@@ -250,7 +255,9 @@ export function DeviceDetail(props: DeviceDetailProps) {
         </p>
       </section>
 
-      {device.advertisingMode === "rotating" && <QuerySettingsSection key={device.id} device={device} onLoad={props.onLoadQuerySettings} onSave={props.onSaveQuerySettings} />}
+      {device.advertisingMode === "rotating" && (
+        <QuerySettingsSection key={device.id} deviceId={device.id} revision={props.queryRevision} onLoad={props.onLoadQuerySettings} onSave={props.onSaveQuerySettings} />
+      )}
 
       <section aria-label="附近蓝牙" className="mt-5 px-4">
         <div className="rounded-2xl border border-line bg-card px-3.5 py-3">

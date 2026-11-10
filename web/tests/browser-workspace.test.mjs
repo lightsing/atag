@@ -1,14 +1,42 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { sha256 } from '@noble/hashes/sha2.js';
 import { BrowserWorkspaceClient, validateAnisetteUrl } from '../lib/workspace/browser-workspace-client.ts';
 import { MemoryWorkspaceStore } from '../lib/workspace/store.ts';
-import { nextRollingKey, publicKey, base64, unbase64, decryptReport, makeConfiguration, reportKeys } from '../lib/workspace/crypto.ts';
+import { P224, concat, nextRollingKey, publicKey, base64, unbase64, decryptReport, makeConfiguration, reportKeys } from '../lib/workspace/crypto.ts';
 import { validateWorkspace } from '../lib/workspace/backup.ts';
+import { estimateRotation, REPORT_LOOKBACK_MS, ROTATION_COUNT_MAX, ROTATION_MAX } from '../lib/workspace/report-query.ts';
 import { parseConfigPackage } from '../lib/ble/protocol.ts';
 import { BridgeClient } from '../lib/agent/bridge-client.ts';
 
 const privateOne = Uint8Array.from({length:28},(_,i)=>i===27?1:0);
 const fixture='Lr6/gAEEcGpG3Hbct2eY5g5tiUdHiNFtwYAy0mj9GnBPphwrdqe8JedwKnBPqYaJKEn8pilIes83CdLk6LvhomR1lWhY7ZJitktKyXCWopVCrmanPZUe+A==';
+const MINUTE = 60_000;
+
+async function waitForRefresh(client, operation) {
+  for (let i = 0; i < 200; i++) {
+    const next = await client.getOperation(operation.id);
+    if (!['running', 'queued'].includes(next.status)) return next;
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  throw new Error('operation timeout');
+}
+
+async function encryptFixture(privateKey, time) {
+  const header = new Uint8Array(5);
+  new DataView(header.buffer).setUint32(0, Math.floor(time / 1000) - 978307200);
+  const ephemeral = P224.BASE.multiply(2n).toBytes(false);
+  const shared = P224.fromBytes(publicKey(privateKey)).multiply(2n).toBytes(false).slice(1, 29);
+  const symmetric = sha256(concat(shared, Uint8Array.of(0, 0, 0, 1), ephemeral));
+  const key = await crypto.subtle.importKey('raw', symmetric.slice(0, 16), 'AES-GCM', false, ['encrypt']);
+  const clear = new Uint8Array(10);
+  const view = new DataView(clear.buffer);
+  view.setInt32(0, 377749000);
+  view.setInt32(4, -1224194000);
+  clear[8] = 23;
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: symmetric.slice(16) }, key, clear);
+  return concat(header, ephemeral, new Uint8Array(ciphertext));
+}
 
 test('Anisette defaults to emulated macOS CoreADI and retains existing sources',()=>{
   assert.equal(validateAnisetteUrl(''),'mac-coreadi');assert.equal(validateAnisetteUrl(' mac-coreadi '),'mac-coreadi');
@@ -25,7 +53,9 @@ test('browser P-224 rolling derivation matches independent Rust/Python vectors',
   assert.equal(Buffer.from(publicKey(first.privateKey).slice(1,29)).toString('hex'),'335f9aaa896b3a0ca867fffb91cb62652f232559c8141f1382d9912a');
   const keys={kind:'rotating',masterPrivateKey:base64(privateOne),symmetricSeed:base64(Uint8Array.from({length:32},(_,i)=>i))};
   const window=await reportKeys(keys,{rotationStart:2,rotationCount:1});
-  assert.equal(Buffer.from(publicKey([...window.values()][0]).slice(1,29)).toString('hex'),'675f96c4e5a6b5bfc2988d03e1550af05453412c64d73fd37ee3d4ff');
+  const [matched] = window.values();
+  assert.equal(matched.rotation, 2);
+  assert.equal(Buffer.from(publicKey(matched.privateKey).slice(1,29)).toString('hex'),'675f96c4e5a6b5bfc2988d03e1550af05453412c64d73fd37ee3d4ff');
 });
 
 test('browser decrypts independent 88/89-byte GCM reports; rejects tampering and decodes battery voltage',async()=>{
@@ -52,6 +82,113 @@ test('offline key generation, edits, reports and identity survive a new reposito
   assert.equal((await second.getQuerySettings(bundle.deviceId)).rotationStart,513);
   await assert.rejects(second.refreshReports(bundle.deviceId),{code:'AGENT_UNAVAILABLE'});
   assert.equal((await second.listDevices()).length,1);
+});
+
+test('automatic range uses the latest known round and keeps older in-window rounds', () => {
+  const now = Date.parse('2026-11-09T12:00:00Z');
+  const at = offset => new Date(now + offset * MINUTE).toISOString();
+  const record = { keys: { kind: 'rotating' }, device: { rotationIntervalMinutes: 15 }, reports: [{ observedAt: at(-5) }] };
+  assert.equal(estimateRotation(record, now), null);
+  record.reports.push(
+    { observedAt: at(-90), rotation: 900 },
+    { observedAt: at(-10000), rotation: 205 },
+    { observedAt: at(1), rotation: 1000 },
+  );
+  const reportEstimate = estimateRotation(record, now);
+  assert.deepEqual(reportEstimate.anchor, { observedAt: at(-90), rotation: 900, source: 'report' });
+  assert.equal(reportEstimate.estimatedRotation, 906);
+  assert.equal(reportEstimate.rotationStart, 205);
+  assert.equal(reportEstimate.rotationStart + reportEstimate.rotationCount - 1, 907);
+
+  record.reports = [{ observedAt: at(-REPORT_LOOKBACK_MS / MINUTE - 30), rotation: 900 }];
+  const stale = estimateRotation(record, now);
+  assert.equal(stale.rotationStart, 899); // Include the known round if the Tag lost power.
+  assert.ok(stale.rotationStart + stale.rotationCount > stale.estimatedRotation);
+
+  record.rotationTiming = { observedAt: at(-2), intervalMinutes: 1, rotation: ROTATION_MAX - 1 };
+  const limited = estimateRotation(record, now);
+  assert.equal(limited.anchor.source, 'tag');
+  assert.equal(limited.rotationCount, ROTATION_COUNT_MAX);
+  assert.equal(limited.rotationStart + limited.rotationCount - 1, ROTATION_MAX);
+  assert.equal(limited.limited, true);
+});
+
+test('browser saves a bound Tag runtime period separately from its provisioning package', async () => {
+  const store = new MemoryWorkspaceStore();
+  const client = new BrowserWorkspaceClient(store);
+  const bundle = await client.createProvisioningBundle({ name: '我的标签', mode: 'rotating', rotationIntervalMinutes: 15 });
+  const serial = 'D300000001000000';
+  const observedAt = new Date(Date.now() - 31 * MINUTE).toISOString();
+  const timing = { observedAt, rotation: 123, intervalMinutes: 30 };
+  assert.equal(await client.observeRotationTiming(serial, timing), false);
+  await client.confirmProvisioning(bundle.deviceId, serial);
+  assert.equal(await client.observeRotationTiming(serial, timing), true);
+  assert.equal(await client.observeRotationTiming('d300000002000000', timing), false);
+  assert.equal(await client.observeRotationTiming(serial, { ...timing, intervalMinutes: 20 }), false);
+  const second = new BrowserWorkspaceClient(store);
+  const view = await second.getQuerySettings(bundle.deviceId);
+  assert.equal(view.intervalMinutes, 30);
+  assert.equal(view.intervalFromTag, true);
+  assert.equal(view.estimate.estimatedRotation, 124);
+  assert.deepEqual(await second.getProvisioningBundle(bundle.deviceId), bundle);
+
+  const restored = new BrowserWorkspaceClient(new MemoryWorkspaceStore());
+  await restored.restoreBackup(await second.exportBackup('test-password'), 'test-password');
+  assert.deepEqual((await restored.getQuerySettings(bundle.deviceId)).estimate.anchor, view.estimate.anchor);
+  await restored.confirmProvisioning(bundle.deviceId, serial);
+  const reprovisioned = await restored.getQuerySettings(bundle.deviceId);
+  assert.equal(reprovisioned.intervalMinutes, 15);
+  assert.equal(reprovisioned.intervalFromTag, false);
+});
+
+test('refresh recovers the round of a cached report, expands automatically, and honors manual mode', async t => {
+  const store = new MemoryWorkspaceStore();
+  const client = new BrowserWorkspaceClient(store);
+  const { deviceId } = await client.createProvisioningBundle({ name: 'rotating fixture', mode: 'rotating' });
+  const { keys } = (await store.read()).records[0];
+  const rounds = [...await reportKeys(keys, { rotationStart: 2, rotationCount: 3 })];
+  const [firstId, firstKey] = rounds[0];
+  const [laterId, laterKey] = rounds[2];
+  const now = Date.now();
+  const first = await encryptFixture(firstKey.privateKey, now - 35 * MINUTE);
+  const later = await encryptFixture(laterKey.privateKey, now - 4 * MINUTE);
+  const legacy = await decryptReport(deviceId, firstKey.privateKey, first);
+  await store.update(data => {
+    data.records[0].reports = [legacy];
+    data.records[0].query = { rotationStart: 2, rotationCount: 2 };
+    data.account = { dsid: '123', searchPartyToken: 'test', uid: 'uid', deviceId: 'client', accountLabel: null };
+    data.anisetteUrl = 'local';
+  });
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    if (url.endsWith('/health')) return Response.json({ protocolVersion: 1, agentVersion: 'test', capabilities: { anisette: true, appleRelay: true } });
+    if (url.endsWith('/anisette')) return Response.json({ headers: { 'x-apple-i-md': 'test', 'x-apple-i-md-m': 'test' }, clientInfo: 'test', userAgent: 'test' });
+    const ids = JSON.parse(atob(JSON.parse(init.body).bodyBase64)).fetch[0].primaryIds;
+    requests.push(ids);
+    const locationPayload = [[firstId, first], [laterId, later]]
+      .filter(([id]) => ids.includes(id))
+      .map(([id, payload]) => ({ id, locationInfo: [base64(payload)] }));
+    const bodyBase64 = btoa(JSON.stringify({ acsnLocations: { statusCode: '200', locationPayload } }));
+    return Response.json({ status: 200, headers: {}, bodyBase64 });
+  };
+  await client.connectBridge('http://127.0.0.1:18432');
+  assert.equal((await client.getQuerySettings(deviceId)).estimate, null);
+  const refresh = async () => waitForRefresh(client, await client.refreshReports(deviceId));
+
+  assert.deepEqual((await refresh()).result, { newReportCount: 0 });
+  assert.deepEqual(requests[0], rounds.slice(0, 2).map(([id]) => id));
+  assert.deepEqual((await client.getDevice(deviceId)).latestReport, { ...legacy, rotation: 2 });
+  assert.equal((await client.getQuerySettings(deviceId)).estimate.estimatedRotation, 4);
+
+  assert.deepEqual((await refresh()).result, { newReportCount: 1 });
+  assert.ok(requests[1].includes(laterId));
+  assert.equal((await client.getDevice(deviceId)).latestReport.rotation, 4);
+
+  await client.updateQuerySettings(deviceId, { rotationMode: 'manual', rotationStart: 2, rotationCount: 1 });
+  assert.deepEqual((await refresh()).result, { newReportCount: 0 });
+  assert.deepEqual(requests[2], [firstId]);
 });
 
 test('encrypted backups roundtrip keys, reports and settings; exclude account by default',async()=>{
@@ -154,7 +291,7 @@ test('browser fetch pipeline decrypts and persists ciphertext locally; expired s
     const [device]=await client.listDevices();
     const account=JSON.stringify({dsid:'123',searchPartyToken:'synthetic',uid:'uid',deviceId:'client',accountLabel:null});
     await store.update(data=>{data.account=JSON.parse(account);data.anisetteUrl='local';});await client.connectBridge('http://127.0.0.1:18432');
-    const wait=async(op)=>{for(let i=0;i<100;i++){const next=await client.getOperation(op.id);if(!['running','queued'].includes(next.status))return next;await new Promise(r=>setTimeout(r,2));}throw new Error('operation timeout');};
+    const wait=op=>waitForRefresh(client,op);
     const first=await wait(await client.refreshReports(device.id));assert.equal(first.status,'succeeded');assert.equal(first.result.newReportCount,1);
     assert.equal((await client.getDevice(device.id)).latestReport.latitude,37.7749);
     assert.equal((await wait(await client.refreshReports(device.id))).result.newReportCount,0);

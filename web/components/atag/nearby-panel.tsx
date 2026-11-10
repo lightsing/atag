@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Bluetooth,
   BluetoothOff,
@@ -17,6 +17,7 @@ import {
 import type { BleConnectionState, TagDevice } from "@/lib/contracts";
 import { absoluteTime, formatCountdown, formatMillivolts, relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import type { RotationTiming } from "@/lib/workspace/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { KeyProvisioning, type WorkspaceProvisioningProps } from "./key-provisioning";
@@ -40,6 +41,7 @@ import {
   type NearbySession,
   type SessionCountdown,
 } from "./use-nearby-session";
+import { errorText } from "./workspace-data";
 
 export type NearbyIntent = "manage" | "provision";
 type Tab = "status" | "name" | "settings" | "keys" | "maintenance";
@@ -73,18 +75,24 @@ interface NearbyPanelProps {
   intent: NearbyIntent;
   devices: TagDevice[];
   provisioning: WorkspaceProvisioningProps;
+  onObserveRotationTiming: ((serial: string, timing: RotationTiming) => Promise<void>) | null;
   onShowDevice(id: string): void;
 }
 
 export function NearbyPanel(props: NearbyPanelProps) {
-  const { open, intent } = props;
+  const { open, intent, devices, onObserveRotationTiming } = props;
   const session = useNearbySession(open);
   const { snapshot, linkUp } = session;
   const now = useNow(open);
   const [tab, setTab] = useState<Tab>("status");
+  const [timingError, setTimingError] = useState<string | null>(null);
+  const lastTiming = useRef<string | null>(null);
 
   useEffect(() => {
-    if (open) setTab(intent === "provision" ? "keys" : "status");
+    if (open) {
+      setTab(intent === "provision" ? "keys" : "status");
+      setTimingError(null);
+    }
   }, [open, intent]);
 
   const writing = session.task === "name" || session.task === "settings" || session.task === "keys" || session.task === "reboot" || session.task === "factory_reset";
@@ -96,6 +104,26 @@ export function NearbyPanel(props: NearbyPanelProps) {
   const countdown = sessionCountdown(snapshot, now);
   const stale = !linkUp && session.everConnected;
   const encrypted = snapshot.encryption === "encrypted" && linkUp;
+  const { connectedAt, telemetryReceivedAt, telemetry, settings } = snapshot;
+  const serial = telemetry?.chipSerial.toLowerCase();
+  const rotation = telemetry?.keyMode === "rotating" && telemetry.flags.encrypted ? telemetry.rotation : 0;
+  const interval = settings?.rotation_minutes;
+  const coherent = interval !== undefined && Math.min(interval * 60, 0xffffffff) === telemetry?.rotationIntervalSeconds;
+
+  useEffect(() => {
+    if (!open || !encrypted || !connectedAt || !telemetryReceivedAt || telemetryReceivedAt < connectedAt ||
+        !serial || rotation < 1 || !interval || !coherent || !onObserveRotationTiming ||
+        !devices.some((device) => device.chipSerial?.toLowerCase() === serial && device.advertisingMode === "rotating")) return;
+    // Telemetry repeats each second. Persist only the first observation of a round per connection and period.
+    const key = `${connectedAt}/${serial}/${interval}/${rotation}`;
+    if (lastTiming.current === key) return;
+    lastTiming.current = key;
+    void onObserveRotationTiming(serial, { rotation, observedAt: telemetryReceivedAt, intervalMinutes: interval }).then(
+      () => { if (lastTiming.current === key) setTimingError(null); },
+      (error) => { if (lastTiming.current === key) setTimingError(errorText(error, "无法保存轮换周期。")); },
+    );
+  }, [open, encrypted, connectedAt, telemetryReceivedAt, serial, rotation, interval, coherent, devices, onObserveRotationTiming]);
+
   const hasProtectedData = snapshot.telemetry !== null || snapshot.settings !== null || snapshot.deviceName !== null;
   const showManage = encrypted || (stale && hasProtectedData);
   const unsupported = session.availability !== null && !session.availability.supported;
@@ -142,6 +170,7 @@ export function NearbyPanel(props: NearbyPanelProps) {
             <InlineNotice tone="info">配置密钥：先连接并辨认 Tag，再启用加密管理，然后在“密钥”页导入配置包并写入。</InlineNotice>
           )}
           {session.notice && <InlineNotice tone={session.notice.tone}>{session.notice.text}</InlineNotice>}
+          {timingError && <InlineNotice tone="error">轮换周期未保存到浏览器：{timingError}</InlineNotice>}
           {session.commandSent && <CommandSentNotice sent={session.commandSent} snapshot={snapshot} now={now} />}
 
           {(linkUp || session.everConnected) && (

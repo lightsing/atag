@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { base64, unbase64, validatePrivate } from './crypto.ts';
+import { ROTATION_COUNT_MAX, ROTATION_MAX, ROTATION_START_MAX } from './report-query.ts';
 import type { BackupSummary, WorkspaceData, WorkspaceRecord } from './types.ts';
 
 export const MAX_IMPORT_BYTES = 64 * 1024 * 1024;
@@ -8,7 +9,7 @@ const finite = z.number().finite();
 const identifier = z.string().min(1).max(160).regex(/^[a-zA-Z0-9_.-]+$/);
 const name = z.string().min(1).max(320).refine(s => [...s].length <= 80 && !/[\x00-\x1f\x7f-\x9f]/.test(s));
 const report = z.object({
-  id: identifier, deviceId: identifier, observedAt: time,
+  id: identifier, deviceId: identifier, observedAt: time, rotation: z.number().int().min(1).max(ROTATION_MAX).optional(),
   latitude: finite.min(-90).max(90), longitude: finite.min(-180).max(180),
   horizontalAccuracyMeters: finite.min(0).max(1e7),
   batteryMillivolts: finite.min(2400).max(4200), source: z.literal('findmy'),
@@ -26,7 +27,16 @@ const keys = z.discriminatedUnion('kind', [
   z.object({kind:z.literal('rotating'),masterPrivateKey:z.string().length(40),symmetricSeed:z.string().length(44)}).strict(),
 ]);
 const record = z.object({device, keys,
-  query:z.object({rotationStart:z.number().int().min(1).max(10_000_000),rotationCount:z.number().int().min(1).max(4096)}).strict(),
+  query:z.object({
+    rotationStart:z.number().int().min(1).max(ROTATION_START_MAX),
+    rotationCount:z.number().int().min(1).max(ROTATION_COUNT_MAX),
+    rotationMode:z.enum(['auto','manual']).optional(),
+  }).strict(),
+  rotationTiming:z.object({
+    rotation:z.number().int().min(1).max(0xffffffff),
+    observedAt:time,
+    intervalMinutes:z.number().int().min(1).max(0xffffffff),
+  }).strict().optional(),
   reports:z.array(report).max(20000),provisioning:z.enum(['draft','confirmed']),
 }).strict();
 export const accountSchema = z.object({dsid:z.string().min(1).max(256),searchPartyToken:z.string().min(1).max(8192),uid:z.string().min(1).max(256),deviceId:z.string().min(1).max(256),accountLabel:z.string().max(200).nullable()}).strict();
@@ -89,9 +99,20 @@ export function mergeRecords(current:WorkspaceData,incoming:WorkspaceData) {
     const existing=next.records.find(r=>r.device.id===entry.device.id);
     if(existing){
       if(JSON.stringify(existing.keys)!==JSON.stringify(entry.keys) || (existing.device.chipSerial && entry.device.chipSerial && existing.device.chipSerial!==entry.device.chipSerial)) throw new Error('相同档案的密钥或序列号冲突，整个导入已取消。');
-      const reports=new Map(existing.reports.map(r=>[r.id,r])); for(const item of entry.reports)if(!reports.has(item.id))reports.set(item.id,item);
+      const reports = new Map(existing.reports.map(report => [report.id, report]));
+      for (const item of entry.reports) {
+        const saved = reports.get(item.id);
+        if (!saved) reports.set(item.id, item);
+        else if (saved.rotation === undefined && item.rotation !== undefined) {
+          reports.set(item.id, { ...saved, rotation: item.rotation });
+        }
+      }
       existing.reports=[...reports.values()];
       existing.device.chipSerial ??= entry.device.chipSerial;
+      const timing = entry.rotationTiming;
+      if (timing && (!existing.rotationTiming || timing.observedAt > existing.rotationTiming.observedAt)) {
+        existing.rotationTiming = timing;
+      }
     }else next.records.push(structuredClone(entry));
   }
   // Preserve current account, settings and nicknames on merge. Import credentials only if none exist.

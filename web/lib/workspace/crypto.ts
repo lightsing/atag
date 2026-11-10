@@ -2,7 +2,7 @@ import { weierstrass } from '@noble/curves/abstract/weierstrass.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { crc32, decodeAdvertisementVoltage } from '../ble/protocol.ts';
 import type { AdvertisingMode, LocationReport } from '../contracts';
-import type { KeyMaterial, QuerySettings } from './types.ts';
+import type { KeyMaterial, QueryWindow } from './types.ts';
 
 // SEC2 / NIST P-224 domain parameters. Group operations use noble's validated engine.
 export const P224_ORDER = 0xffffffffffffffffffffffffffff16a2e0b8f03e13dd29455c5c2a3dn;
@@ -67,16 +67,18 @@ export function nextRollingKey(master: Uint8Array, seed: Uint8Array): { seed: Ui
   return { seed: next, privateKey: bigToBytes(value) };
 }
 function checkAbort(signal?: AbortSignal) { if (signal?.aborted) throw new DOMException('已取消', 'AbortError'); }
-export async function reportKeys(keys: KeyMaterial, query: QuerySettings, signal?: AbortSignal): Promise<Map<string, Uint8Array>> {
-  checkAbort(signal); const result = new Map<string, Uint8Array>();
-  const add = (key: Uint8Array) => result.set(base64(sha256(publicKey(key).slice(1, 29))), key);
+interface ReportKey { privateKey: Uint8Array; rotation?: number }
+export async function reportKeys(keys: KeyMaterial, query: QueryWindow, signal?: AbortSignal): Promise<Map<string, ReportKey>> {
+  checkAbort(signal); const result = new Map<string, ReportKey>();
+  const add = (privateKey: Uint8Array, rotation?: number) =>
+    result.set(base64(sha256(publicKey(privateKey).slice(1, 29))), { privateKey, rotation });
   if (keys.kind === 'fixed') add(validatePrivate(keys.privateKey));
   else {
     const master = validatePrivate(keys.masterPrivateKey); let seed = unbase64(keys.symmetricSeed, 32);
     const end = query.rotationStart + query.rotationCount;
     for (let round = 1; round < end; round++) {
       if (round < query.rotationStart) seed = kdf(seed, 1, 'update');
-      else { const next = nextRollingKey(master, seed); seed = next.seed; add(next.privateKey); }
+      else { const next = nextRollingKey(master, seed); seed = next.seed; add(next.privateKey, round); }
       if (round % (round < query.rotationStart ? 2048 : 16) === 0) { await new Promise(resolve => setTimeout(resolve, 0)); checkAbort(signal); }
     }
   }
