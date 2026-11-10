@@ -9,7 +9,7 @@ export function emptyBleSession(): BleSessionSnapshot {
     state: "disconnected", device: null, identity: null, deviceName: null,
     batteryMillivolts: null, telemetry: null, settings: null, encryption: "unknown",
     buttonCounter: null, lastButtonPressAt: null, connectedAt: null,
-    estimatedConnectionDeadline: null, telemetryReceivedAt: null, busyOperation: null,
+    estimatedConnectionDeadline: null, telemetryReceivedAt: null, otaStatus: null, busyOperation: null,
   };
 }
 

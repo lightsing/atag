@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   AlertTriangle,
+  ArrowUpCircle,
   Bluetooth,
   Check,
   ChevronLeft,
@@ -53,6 +54,7 @@ interface DeviceDetailProps {
   onClose(): void;
   onCopy(text: string): Promise<boolean>;
   onOpenNearby(): void;
+  onUpgradeFirmware(): void;
   /** Open nearby provisioning with this saved profile preselected. */
   onConfigure(): void;
   onOpenBridgeSettings(): void;
@@ -232,7 +234,7 @@ export function DeviceDetail(props: DeviceDetailProps) {
               }
             />
           )}
-          <Row label="固件版本" value={device.firmwareVersion ?? "未知"} />
+          <Row label="档案记录的固件版本" value={device.firmwareVersion ?? "未知"} />
           <Row label="芯片序列号" value={device.chipSerial ?? "未记录"} mono={!!device.chipSerial} />
           <Row label="档案创建" value={absoluteTime(device.createdAt)} />
           <Row
@@ -251,7 +253,7 @@ export function DeviceDetail(props: DeviceDetailProps) {
           />
         </dl>
         <p className="mt-2 text-[12px] leading-relaxed text-ink-faint">
-          这里的名称是档案昵称，与写入 Tag 的蓝牙名称分开。芯片序列号只在本浏览器生成的密钥被 Tag 确认写入后绑定。固件没有响铃、OTA 或精确寻找接口；报告电压来自 Find My 状态字节，按每条报告保存的编码显示，未换算为电池百分比。
+          这里的名称是档案昵称，与写入 Tag 的蓝牙名称分开。芯片序列号只在本浏览器生成的密钥被 Tag 确认写入后绑定。当前固件版本及升级能力可在连接 Tag 后查看。报告电压来自 Find My 状态字节，未换算为电池百分比。
         </p>
       </section>
 
@@ -263,9 +265,10 @@ export function DeviceDetail(props: DeviceDetailProps) {
         <div className="rounded-2xl border border-line bg-card px-3.5 py-3">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-sm font-semibold text-ink">附近蓝牙</h3>
-            <Button size="sm" variant="outline" onClick={props.onOpenNearby}>
-              <Bluetooth /> 附近管理
-            </Button>
+            <div className="flex flex-wrap justify-end gap-1.5">
+              <Button size="sm" variant="outline" onClick={props.onUpgradeFirmware}><ArrowUpCircle /> 固件升级</Button>
+              <Button size="sm" variant="outline" onClick={props.onOpenNearby}><Bluetooth /> 附近管理</Button>
+            </div>
           </div>
           <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-soft">
             地图上的报告来自 Find My 网络，不代表 Tag 此刻在附近或可以连接。Tag 在手边时，短按按键后可连接查看电压、改名和调整参数；连接到的设备只按芯片序列号与档案对应，序列号在启用加密后读取。

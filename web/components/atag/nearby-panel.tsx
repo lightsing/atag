@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  ArrowUpCircle,
   Bluetooth,
   BluetoothOff,
   Hand,
@@ -21,6 +22,7 @@ import type { RotationTiming } from "@/lib/workspace/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { KeyProvisioning, type WorkspaceProvisioningProps } from "./key-provisioning";
+import { OtaSection } from "./ota-section";
 import {
   Card,
   CommandSentNotice,
@@ -43,14 +45,15 @@ import {
 } from "./use-nearby-session";
 import { errorText } from "./workspace-data";
 
-export type NearbyIntent = "manage" | "provision";
-type Tab = "status" | "name" | "settings" | "keys" | "maintenance";
+export type NearbyIntent = "manage" | "provision" | "ota";
+type Tab = "status" | "name" | "settings" | "keys" | "maintenance" | "ota";
 const TABS: { id: Tab; label: string }[] = [
   { id: "status", label: "状态" },
   { id: "name", label: "名称" },
   { id: "settings", label: "参数" },
   { id: "keys", label: "密钥" },
   { id: "maintenance", label: "维护" },
+  { id: "ota", label: "固件升级" },
 ];
 
 const STATE_TEXT: Record<BleConnectionState, string> = {
@@ -90,18 +93,19 @@ export function NearbyPanel(props: NearbyPanelProps) {
 
   useEffect(() => {
     if (open) {
-      setTab(intent === "provision" ? "keys" : "status");
+      setTab(intent === "provision" ? "keys" : intent === "ota" ? "ota" : "status");
       setTimingError(null);
     }
   }, [open, intent]);
 
-  const writing = session.task === "name" || session.task === "settings" || session.task === "keys" || session.task === "reboot" || session.task === "factory_reset";
+  const upgrading = session.task === "ota";
+  const writing = upgrading || session.task === "name" || session.task === "settings" || session.task === "keys" || session.task === "reboot" || session.task === "factory_reset";
   const requestClose = (next: boolean) => {
     if (!next && writing) return; // never abandon an in-flight write silently
     props.onOpenChange(next);
   };
 
-  const countdown = sessionCountdown(snapshot, now);
+  const countdown = upgrading ? null : sessionCountdown(snapshot, now);
   const stale = !linkUp && session.everConnected;
   const encrypted = snapshot.encryption === "encrypted" && linkUp;
   const { connectedAt, telemetryReceivedAt, telemetry, settings } = snapshot;
@@ -173,7 +177,7 @@ export function NearbyPanel(props: NearbyPanelProps) {
           {timingError && <InlineNotice tone="error">轮换周期未保存到浏览器：{timingError}</InlineNotice>}
           {session.commandSent && <CommandSentNotice sent={session.commandSent} snapshot={snapshot} now={now} />}
 
-          {(linkUp || session.everConnected) && (
+          {(linkUp || session.everConnected) && tab !== "ota" && (
             <>
               <IdentityCard session={session} devices={props.devices} stale={stale} onShowDevice={props.onShowDevice} />
               <IdentifyCard session={session} now={now} />
@@ -183,7 +187,7 @@ export function NearbyPanel(props: NearbyPanelProps) {
           )}
 
           {showManage && (
-            <section aria-label="加密管理" className="space-y-3">
+            <section aria-label="设备管理" className="space-y-3">
               <div role="tablist" aria-label="管理项目" className="flex gap-0.5 overflow-x-auto rounded-xl bg-muted p-0.5">
                 {TABS.map((t) => (
                   <button
@@ -191,6 +195,7 @@ export function NearbyPanel(props: NearbyPanelProps) {
                     type="button"
                     role="tab"
                     aria-selected={tab === t.id}
+                    disabled={upgrading}
                     onClick={() => setTab(t.id)}
                     className={cn(
                       "h-8 flex-1 whitespace-nowrap rounded-lg px-3 text-[13px] font-medium transition-colors",
@@ -201,17 +206,25 @@ export function NearbyPanel(props: NearbyPanelProps) {
                   </button>
                 ))}
               </div>
-              {stale && (
+              {stale && tab !== "ota" && (
                 <InlineNotice tone="warn">连接已断开，以下是断开前读取的数据，不能再保存或发送指令。短按 Tag 后重新连接并启用加密即可继续。</InlineNotice>
               )}
-              <div role="tabpanel">
+              {tab !== "ota" && <div role="tabpanel">
                 {tab === "status" && <TelemetrySection session={session} countdown={countdown} stale={stale} />}
                 {tab === "name" && <NameSection session={session} />}
                 {tab === "settings" && <SettingsSection session={session} now={now} />}
                 {tab === "keys" && <KeyProvisioning session={session} provisioning={props.provisioning} />}
                 {tab === "maintenance" && <MaintenanceSection session={session} />}
-              </div>
+              </div>}
             </section>
+          )}
+          {!showManage && !unsupported && (
+            <Button size="sm" variant="outline" disabled={session.busy} onClick={() => setTab(tab === "ota" ? "status" : "ota")}>
+              {tab === "ota" ? "返回附近管理" : <><ArrowUpCircle /> 固件升级</>}
+            </Button>
+          )}
+          {tab === "ota" && !unsupported && (
+            <div role={showManage ? "tabpanel" : undefined}><OtaSection session={session} /></div>
           )}
         </div>
 
@@ -262,7 +275,7 @@ function ConnectionCard({ session, countdown }: { session: NearbySession; countd
         )}
       </div>
 
-      {linkUp && (
+      {linkUp && session.task !== "ota" && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
           <p className="min-w-0 flex-1 text-[11.5px] leading-snug text-ink-faint">
             {countdown?.source === "estimate" ? estimateLabel : "按设备遥测的剩余秒数推算。"} 按键不会延长连接，到时设备会断开。

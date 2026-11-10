@@ -64,6 +64,7 @@ export function fakeGatt(options = {}) {
   add(NAME, new TextEncoder().encode("我的标签"));
   add(SETTINGS, encodeSettings(DEFAULT_SETTINGS));
   add(BUTTON, u32(7)); add(PAIRING, Uint8Array.of(0));
+  for (const [uuid, bytes] of options.characteristics ?? []) add(uuid, bytes);
   for (const [key, uuid] of Object.entries(DEVICE_INFORMATION_UUIDS)) {
     add(uuid, new TextEncoder().encode({ manufacturer: "ATAG", model: "nRF52832", firmwareVersion: "0.1.0", serial: "0102030405060708" }[key]));
   }

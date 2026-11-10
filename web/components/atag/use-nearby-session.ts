@@ -9,6 +9,8 @@ import type {
   TagSettings,
 } from "@/lib/contracts";
 import { isBleError } from "@/lib/ble/ble-error";
+import type { OtaPackage } from "@/lib/ble/ota-protocol";
+import type { OtaProgress, OtaReceipt, OtaVerification } from "@/lib/ble/ota-transfer";
 import { WebBluetoothClient } from "@/lib/ble/web-bluetooth-client";
 
 export type NearbyTask =
@@ -21,6 +23,7 @@ export type NearbyTask =
   | "keys"
   | "reboot"
   | "factory_reset"
+  | "ota"
   | "led_find"
   | "led_stop";
 // LED control has a transient acknowledgement, never a Flash commit outcome.
@@ -30,6 +33,14 @@ export interface Notice {
   tone: "info" | "error";
   text: string;
 }
+
+export type NearbyOta =
+  | { kind: "progress"; version: string; progress: OtaProgress }
+  | { kind: "verifying"; receipt: OtaReceipt }
+  | { kind: "pending"; receipt: OtaReceipt; message: string }
+  | { kind: "checked"; receipt: OtaReceipt; verification: OtaVerification }
+  | { kind: "failed"; message: string }
+  | { kind: "cancelled" };
 
 /**
  * Result of one persistent update. `committed` only when the status
@@ -145,6 +156,7 @@ export const EMPTY_SNAPSHOT: BleSessionSnapshot = {
   connectedAt: null,
   estimatedConnectionDeadline: null,
   telemetryReceivedAt: null,
+  otaStatus: null,
   busyOperation: null,
 };
 
@@ -175,6 +187,7 @@ export interface NearbySession {
   commandSent: CommandSent | null;
   /** Last LED request on the current link; cleared when a new link starts. */
   ledOutcome: LedOutcome | null;
+  ota: NearbyOta | null;
   pick(): void;
   reconnect(): void;
   disconnect(): void;
@@ -184,6 +197,9 @@ export interface NearbySession {
   saveName(name: string): Promise<CommitOutcome | null>;
   saveSettings(settings: TagSettings): Promise<CommitOutcome | null>;
   applyKeys(bytes: Uint8Array): Promise<CommitOutcome | null>;
+  uploadFirmware(update: OtaPackage): void;
+  cancelFirmwareUpload(): void;
+  verifyFirmware(): void;
   reboot(): Promise<boolean>;
   factoryReset(): Promise<boolean>;
   /** true: find (≤ 10 s, firmware-timed); false: stop. Never changes settings or extends the link. */
@@ -213,9 +229,11 @@ export function useNearbySession(open: boolean): NearbySession {
   const [keysOutcome, setKeysOutcome] = useState<CommitOutcome | null>(null);
   const [commandSent, setCommandSent] = useState<CommandSent | null>(null);
   const [ledOutcome, setLedOutcome] = useState<LedOutcome | null>(null);
+  const [ota, setOta] = useState<NearbyOta | null>(null);
 
   const clientRef = useRef<BleClient | null>(null);
   const taskRef = useRef<NearbyTask | null>(null);
+  const otaRun = useRef<{ controller: AbortController; cancellable: boolean } | null>(null);
 
   // Create / dispose the single client while open.
   useEffect(() => {
@@ -239,6 +257,7 @@ export function useNearbySession(open: boolean): NearbySession {
     setKeysOutcome(null);
     setCommandSent(null);
     setLedOutcome(null);
+    setOta(null);
 
     let prev = next.getSession();
     const unsubscribe = next.subscribeSession((snap) => {
@@ -272,6 +291,8 @@ export function useNearbySession(open: boolean): NearbySession {
     });
 
     return () => {
+      otaRun.current?.controller.abort();
+      otaRun.current = null;
       unsubscribe();
       next.dispose();
       if (clientRef.current === next) clientRef.current = null;
@@ -325,7 +346,7 @@ export function useNearbySession(open: boolean): NearbySession {
   const reconnect = useCallback(() => connectFlow(false), [connectFlow]);
 
   const disconnect = useCallback(() => {
-    clientRef.current?.disconnect();
+    if (taskRef.current !== "ota") clientRef.current?.disconnect();
   }, []);
 
   /** Sequential protected reads: never Promise.all several GATT operations. */
@@ -413,6 +434,54 @@ export function useNearbySession(open: boolean): NearbySession {
     [commit],
   );
 
+  const finishOta = async (c: BleClient, receipt: OtaReceipt, signal: AbortSignal, automatic: boolean) => {
+    if (!isCurrent(c)) return;
+    setOta({ kind: "verifying", receipt });
+    try {
+      const verification = await verifyOtaBoot(c, receipt, signal, automatic);
+      if (isCurrent(c)) setOta({ kind: "checked", receipt, verification });
+    } catch (error) {
+      if (isCurrent(c)) setOta({ kind: "pending", receipt, message: errorText(error, "未能核验重启后的固件。") });
+    }
+  };
+
+  const uploadFirmware = (update: OtaPackage) => {
+    void run("ota", async (c) => {
+      const operation = { controller: new AbortController(), cancellable: true };
+      otaRun.current = operation;
+      setOta({ kind: "progress", version: update.version, progress: { phase: "preparing", received: 0, total: update.image.length } });
+      try {
+        const receipt = await c.uploadFirmware(update, (progress) => {
+          operation.cancellable = progress.phase !== "finishing";
+          if (!isCurrent(c)) return;
+          setOta((last) => last?.kind === "progress" && last.progress.phase === progress.phase &&
+            Math.floor(last.progress.received * 100 / progress.total) === Math.floor(progress.received * 100 / progress.total)
+            ? last : { kind: "progress", version: update.version, progress });
+        }, operation.controller.signal);
+        await finishOta(c, receipt, operation.controller.signal, true);
+      } catch (error) {
+        if (isCurrent(c)) setOta(operation.controller.signal.aborted
+          ? { kind: "cancelled" } : { kind: "failed", message: errorText(error, "固件上传失败。") });
+      } finally {
+        if (otaRun.current === operation) otaRun.current = null;
+      }
+    });
+  };
+
+  const cancelFirmwareUpload = () => {
+    if (otaRun.current?.cancellable) otaRun.current.controller.abort();
+  };
+
+  const verifyFirmware = () => {
+    if (ota?.kind !== "pending") return;
+    void run("ota", async (c) => {
+      const operation = { controller: new AbortController(), cancellable: false };
+      otaRun.current = operation;
+      try { await finishOta(c, ota.receipt, operation.controller.signal, false); }
+      finally { if (otaRun.current === operation) otaRun.current = null; }
+    });
+  };
+
   const sendCommand = useCallback(
     async (which: "reboot" | "factory_reset") => {
       setNotice(null);
@@ -493,6 +562,7 @@ export function useNearbySession(open: boolean): NearbySession {
     clearKeysOutcome: () => setKeysOutcome(null),
     commandSent,
     ledOutcome,
+    ota,
     pick,
     reconnect,
     disconnect,
@@ -502,10 +572,38 @@ export function useNearbySession(open: boolean): NearbySession {
     saveName,
     saveSettings,
     applyKeys,
+    uploadFirmware,
+    cancelFirmwareUpload,
+    verifyFirmware,
     reboot,
     factoryReset,
     identifyLed,
   };
+}
+
+async function verifyOtaBoot(c: BleClient, receipt: OtaReceipt, signal: AbortSignal, automatic: boolean) {
+  const wait = async (ms: number) => {
+    await new Promise(resolve => setTimeout(resolve, ms));
+    signal.throwIfAborted();
+  };
+  signal.throwIfAborted();
+  if (c.deviceInfo?.id !== receipt.deviceId) throw new Error("请重新连接刚才升级的同一只 Tag。");
+  if (automatic) {
+    const until = performance.now() + 10_000;
+    while (c.state !== "disconnected" && performance.now() < until) await wait(200);
+    if (c.state !== "disconnected") throw new Error("尚未观察到 Tag 重启。");
+    await wait(1200);
+  }
+  const until = performance.now() + 60_000;
+  while (c.state === "disconnected") {
+    try { await c.connect(); }
+    catch (error) {
+      if (!automatic || performance.now() >= until) throw error;
+      await wait(800);
+    }
+  }
+  signal.throwIfAborted();
+  return c.verifyFirmware(receipt);
 }
 
 /* ---------------- Clock & countdown ---------------- */

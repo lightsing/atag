@@ -221,6 +221,7 @@ export function AtagApp() {
       onClose={closeDetail}
       onCopy={onCopy}
       onOpenNearby={() => openNearby()}
+      onUpgradeFirmware={() => openNearby("ota")}
       onConfigure={() => openNearby("provision", selected.id)}
       onOpenBridgeSettings={() => openSettings(fetchReadiness.bridgeConnected ? "apple" : "bridge")}
       queryRevision={session.reportsVersion}

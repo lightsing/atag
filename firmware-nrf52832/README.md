@@ -253,8 +253,8 @@ does not contain GPS or retrieve coordinates itself.
 
 ## Bluetooth OTA
 
-The OTA protocol is ATAG-specific; use the Python client below. It is not the
-Nordic Secure DFU protocol understood by Nordic's mobile DFU app. S112 and
+The OTA protocol is ATAG-specific. Use the [ATAG web app](../web/README.md#固件升级)
+or the Python client below. Nordic's mobile Secure DFU app uses a different protocol. S112 and
 the bootloader are installed through SWD; Bluetooth updates replace only the
 application. See [OTA tools](../tools/ota/README.md).
 

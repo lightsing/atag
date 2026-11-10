@@ -24,7 +24,10 @@ application with Ed25519. It excludes S112, bootloader, UICR and user storage.
 
 ## Uploading
 
-Press P0.13 to open the management window, scan and select the intended address:
+Press P0.13 to open the management window. Use **附近管理 → 固件升级** in the
+[ATAG web app](https://lightsing.github.io/atag/) and choose the signed package.
+The [web OTA instructions](../../web/README.md#固件升级) cover its compatibility
+and verification. For command-line upload, scan and select the intended address:
 
 ```sh
 .venv/bin/python tools/gatt/atag_gatt.py scan
@@ -39,8 +42,7 @@ required for signed OTA; settings and key writes require session encryption.
 An interrupted upload can be restarted. Swap/revert resumes after power loss.
 An unconfirmed trial reverts on reset; a 30-second watchdog recovers a hung
 application. Successful startup confirms the image. Firmware-version downgrade
-prevention is not implemented. The protocol is ATAG-specific; there is no web
-OTA interface.
+prevention is not implemented. The protocol is ATAG-specific.
 
 ## Verification
 

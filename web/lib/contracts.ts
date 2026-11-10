@@ -1,3 +1,6 @@
+import type { OtaPackage, OtaStatus } from "./ble/ota-protocol";
+import type { OtaProgress, OtaReceipt, OtaVerification } from "./ble/ota-transfer";
+
 /** Browser workspace models. The v1 local bridge only transports ciphertext. */
 export type TagIcon = "keys" | "backpack" | "luggage" | "bike" | "tag";
 export type AdvertisingMode = "fixed" | "rotating";
@@ -154,7 +157,8 @@ export interface BleSessionSnapshot {
   /** Estimate until protected telemetry provides the authoritative remaining time. */
   estimatedConnectionDeadline: string | null;
   telemetryReceivedAt: string | null;
-  busyOperation: "pairing" | "configure" | "rename" | "settings" | "reboot" | "factory_reset" | "led" | null;
+  otaStatus: OtaStatus | null;
+  busyOperation: "pairing" | "configure" | "rename" | "settings" | "reboot" | "factory_reset" | "led" | "ota" | null;
 }
 export interface BleClient {
   readonly state: BleConnectionState;
@@ -182,5 +186,7 @@ export interface BleClient {
   /** Requires an encrypted link; LED receipts never confirm a Flash save. */
   identifyLed?(active: boolean): Promise<ProvisioningStatus>;
   applyConfiguration(bytes: Uint8Array): Promise<ProvisioningStatus>;
+  uploadFirmware(update: OtaPackage, onProgress: (progress: OtaProgress) => void, signal?: AbortSignal): Promise<OtaReceipt>;
+  verifyFirmware(receipt: OtaReceipt): Promise<OtaVerification>;
   subscribe(listener: (state: BleConnectionState) => void): () => void;
 }

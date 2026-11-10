@@ -12,6 +12,11 @@ import {
   DEVICE_INFORMATION_UUIDS, parseConfigPackage, parseProvisioningStatus, parseTelemetry,
 } from "./protocol.ts";
 import { decodeSettings, encodeDeviceName, encodeSettings } from "./settings-protocol.ts";
+import {
+  OTA_CONTROL, OTA_DATA, OTA_LAYOUT, OTA_MIN_BATTERY_MV, OTA_PROFILE, OTA_STATUS, parseOtaProfile, parseOtaStatus,
+  type OtaPackage, type OtaStatus,
+} from "./ota-protocol.ts";
+import { compareOtaBoot, transferOta, type OtaProgress, type OtaReceipt, type OtaVerification } from "./ota-transfer.ts";
 import { BleSessionState, emptyBleSession, TAG_CAPABILITIES } from "./session-state.ts";
 import { getNavigatorBluetooth, type BtBluetooth, type BtCharacteristic, type BtDevice, type BtGattServer } from "./web-bluetooth-types.ts";
 
@@ -36,6 +41,7 @@ export class WebBluetoothClient extends BleSessionState implements BleClient {
   private notificationCleanup = new Map<string, () => void>();
   private cancelWaiters = new Set<() => void>();
   private pendingReceipt: PendingReceipt | null = null;
+  private otaStatusListener: ((status: OtaStatus) => void) | null = null;
   private epoch = 0;
   private ioBusy = false;
   private readonly options: WebBluetoothClientOptions;
@@ -84,7 +90,7 @@ export class WebBluetoothClient extends BleSessionState implements BleClient {
     if (this.state !== "disconnected" || this.ioBusy) throw new BleError("busy", "连接操作正在进行。");
     const epoch = ++this.epoch;
     this.ioBusy = true;
-    this.update({ state: "connecting", encryption: "unknown", deviceName: null, telemetry: null, settings: null, telemetryReceivedAt: null });
+    this.update({ state: "connecting", encryption: "unknown", deviceName: null, telemetry: null, settings: null, telemetryReceivedAt: null, otaStatus: null });
     try {
       const connecting = gatt.connect().then(server => {
         if (epoch !== this.epoch) {
@@ -134,6 +140,14 @@ export class WebBluetoothClient extends BleSessionState implements BleClient {
         const encryption = value.getUint8(0) === 2 ? "encrypted" : this.session.encryption === "pairing" ? "pairing" : "unencrypted";
         this.update({ encryption });
       });
+      // OTA is optional for older Tags; missing characteristics never block management.
+      const otaUuids = [OTA_STATUS, OTA_CONTROL, OTA_DATA, OTA_PROFILE];
+      try {
+        for (const uuid of otaUuids) this.chars.set(uuid, await this.bounded(vendor.getCharacteristic(uuid)));
+        this.update({ otaStatus: parseOtaStatus(await this.read(OTA_STATUS)) });
+      } catch {
+        otaUuids.forEach(uuid => this.chars.delete(uuid));
+      }
       this.assertEpoch(epoch);
       this.update({ state: "connected" });
       return status;
@@ -151,7 +165,8 @@ export class WebBluetoothClient extends BleSessionState implements BleClient {
   dispose(): void { this.disconnect(); this.releaseDevice(); this.clearListeners(); }
   getCapabilities(): DeviceCapabilities {
     const available = this.chars.has(PAIRING) && this.chars.has(SETTINGS);
-    return { ...TAG_CAPABILITIES, provisioning: available, management: available, telemetry: available };
+    const ota = this.session.otaStatus;
+    return { ...TAG_CAPABILITIES, provisioning: available, management: available, telemetry: available, ota: !!ota?.installed && ota.layout === OTA_LAYOUT };
   }
   readIdentity(): Promise<BleIdentity> { return this.exclusive(null, () => this.readIdentityInternal()); }
   readBattery(): Promise<number> {
@@ -220,6 +235,53 @@ export class WebBluetoothClient extends BleSessionState implements BleClient {
     return this.exclusive("configure", async () => {
       await this.ensureEncryptionInternal();
       return this.writeCommitted(CONFIG, payload, "keys");
+    });
+  }
+  uploadFirmware(update: OtaPackage, onProgress: (progress: OtaProgress) => void, signal?: AbortSignal): Promise<OtaReceipt> {
+    return this.exclusive("ota", async () => {
+      const deviceId = this.device?.id;
+      const previousVersion = this.session.identity?.firmwareVersion;
+      if (!deviceId || !previousVersion || !this.getCapabilities().ota) {
+        throw new BleError("incompatible", "此 Tag 不支持当前的网页固件升级协议。");
+      }
+      const connectionId = this.epoch;
+      const batteryMillivolts = await this.readUnsigned(BATTERY, 2);
+      this.update({ batteryMillivolts });
+      if (batteryMillivolts < OTA_MIN_BATTERY_MV) throw new BleError("write_failed", "Tag 电池电压低于 3.0 V，无法升级。");
+      const before = parseOtaProfile(await this.read(OTA_PROFILE));
+      const scheduled = await transferOta({
+        connected: () => this.epoch === connectionId && !!this.server?.connected,
+        disconnect: () => this.disconnect(),
+        readStatus: async () => parseOtaStatus(await this.read(OTA_STATUS)),
+        subscribeStatus: async (listener) => {
+          await this.watch(OTA_STATUS, value => {
+            try { this.otaStatusListener?.(parseOtaStatus(value)); } catch { /* ignore malformed notifications */ }
+          });
+          this.otaStatusListener = listener;
+          return () => { this.otaStatusListener = null; };
+        },
+        write: async (kind, bytes) => {
+          try { await this.write(kind === "control" ? OTA_CONTROL : OTA_DATA, bytes); }
+          catch (error) {
+            if (error instanceof DOMException && error.name === "InvalidModificationError") {
+              throw new BleError("write_failed", "蓝牙连接无法写入升级指令。请重新连接，或换用支持较大蓝牙包的浏览器或设备。");
+            }
+            throw error;
+          }
+        },
+      }, update, onProgress, signal);
+      return { deviceId, connectionId, previousVersion, expectedVersion: update.version, before, scheduled };
+    });
+  }
+  verifyFirmware(receipt: OtaReceipt): Promise<OtaVerification> {
+    return this.exclusive(null, async () => {
+      if (this.device?.id !== receipt.deviceId || this.epoch === receipt.connectionId) {
+        throw new BleError("not_connected", "请等待设备重启，并重新连接刚才升级的同一只 Tag。");
+      }
+      const after = parseOtaProfile(await this.read(OTA_PROFILE));
+      const version = this.session.identity?.firmwareVersion;
+      if (!version) throw new BleError("incompatible", "无法读取重启后的固件版本。");
+      return compareOtaBoot(receipt, version, after);
     });
   }
   reboot(): Promise<void> { return this.control(1); }
@@ -387,9 +449,10 @@ export class WebBluetoothClient extends BleSessionState implements BleClient {
     this.notificationCleanup.clear();
     this.server = null;
     this.chars.clear();
+    this.otaStatusListener = null;
     [...this.cancelWaiters].forEach(cancel => cancel());
     this.cancelWaiters.clear();
-    this.update({ state: "disconnected", encryption: "unencrypted", busyOperation: null, estimatedConnectionDeadline: null });
+    this.update({ state: "disconnected", encryption: "unencrypted", busyOperation: null, estimatedConnectionDeadline: null, otaStatus: null });
   }
   private releaseDevice(): void {
     this.device?.removeEventListener("gattserverdisconnected", this.onDisconnected);
@@ -398,6 +461,7 @@ export class WebBluetoothClient extends BleSessionState implements BleClient {
   private mapError(error: unknown): BleError {
     if (error instanceof BleError) return error;
     const name = error && typeof error === "object" && "name" in error ? String(error.name) : "";
+    if (name === "AbortError") return new BleError("cancelled", "已取消蓝牙操作。");
     if (name === "NotFoundError") return new BleError("cancelled", "未选择设备或找不到服务。短按 Tag 打开 60 秒连接窗口后重试。");
     if (name === "SecurityError" || name === "NotAllowedError") return new BleError("unsupported", "蓝牙或配对权限被拒绝，请检查浏览器与系统权限。");
     if (name === "NetworkError") return new BleError("disconnected", "连接已断开或加密未完成。短按 Tag 后重新连接。");
