@@ -29,7 +29,7 @@ import { loadPreferences } from "@/lib/preferences";
  */
 export type BridgeConnection =
   | { status: "idle" }
-  | { status: "connecting"; discovering: boolean }
+  | { status: "connecting"; phase: "discovering" | "checking" | "permission" }
   | { status: "connected"; health: BridgeHealth; url: string }
   | { status: "error"; error: ClientError };
 
@@ -192,11 +192,15 @@ export function useAtagSession(): AtagSession {
       // A new bridge never continues a sign-in that started on another one.
       ws.cancelAppleLogin();
       ws.disconnectBridge();
-      setBridge({ status: "connecting", discovering: checked === undefined });
+      setBridge({ status: "connecting", phase: checked ? "checking" : "discovering" });
       try {
         const found = checked
           ? { url: checked.url, health: await ws.connectBridge(checked.url, signal) }
-          : await ws.discoverBridge(loadPreferences().agentUrl, signal);
+          : await ws.discoverBridge(loadPreferences().agentUrl, signal, (pending) => {
+              if (!signal.aborted) {
+                setBridge({ status: "connecting", phase: pending ? "permission" : "discovering" });
+              }
+            });
         if (signal.aborted) return false;
         if (!found) {
           setBridge({ status: "error", error: new ClientError("AGENT_UNAVAILABLE", "未找到本地 Agent。启动托盘或 CLI 后可以重新探测，也可以手动输入地址。") });

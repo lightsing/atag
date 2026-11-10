@@ -53,11 +53,13 @@ try {
     assert.equal(new Headers(init.headers).has("Authorization"), false);
     return fetch(url, { ...init, headers: { ...init.headers, Origin: "http://localhost:5173" } });
   };
-  const discovered = await discoverBridge("", undefined, (url, init) => {
-    if (new URL(url).origin === baseUrl || (occupied.listening && Number(new URL(url).port) === ports[0])) {
-      return requestFromWeb(url, init);
-    }
-    return Promise.reject(new Error("Outside the integration test"));
+  const discovered = await discoverBridge("", {
+    fetch: (url, init) => {
+      if (new URL(url).origin === baseUrl || (occupied.listening && Number(new URL(url).port) === ports[0])) {
+        return requestFromWeb(url, init);
+      }
+      return Promise.reject(new Error("Outside the integration test"));
+    },
   });
   assert.equal(discovered?.client.baseUrl, baseUrl);
   const { client, health } = discovered;

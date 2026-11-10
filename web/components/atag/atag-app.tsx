@@ -60,7 +60,7 @@ function SourceStatus({ session, onClick, compact = false }: { session: AtagSess
   let bridgeChip: React.ReactNode = null;
   if (!compact) {
     if (bridge.status === "connected") bridgeChip = session.auth?.status === "ready" ? <Chip tone="ok" dot>可刷新</Chip> : <Chip tone="accent" dot>桥接已连接</Chip>;
-    else if (bridge.status === "connecting") bridgeChip = <Chip tone="accent" dot>连接桥接</Chip>;
+    else if (bridge.status === "connecting") bridgeChip = <Chip tone="accent" dot>{bridge.phase === "permission" ? "等待本地网络权限" : "连接桥接"}</Chip>;
     else if (bridge.status === "error") bridgeChip = <Chip tone="warn" dot>桥接失败</Chip>;
   }
   return (

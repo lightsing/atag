@@ -184,7 +184,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
             <div className="rounded-xl border border-line bg-card px-3.5 py-3 text-[12.5px] leading-relaxed text-ink-soft">
               <p className="font-medium text-ink">关于浏览器限制</p>
               <p className="mt-1">
-                如果浏览器询问是否允许访问本地网络，请允许后重新探测。发布版托盘已允许访问随附的网页地址。自行运行 CLI 时，需要用
+                自动探测时，Chrome 可能询问是否允许访问本地网络。选择「允许」后网页会继续连接。发布版托盘已允许访问随附的网页地址。自行运行 CLI 时，需要用
                 --allow-origin 允许本页的 Origin。
               </p>
             </div>
@@ -220,7 +220,14 @@ export function SettingsSheet(props: SettingsSheetProps) {
 
 function BridgeCard({ bridge, hasAccount }: { bridge: BridgeConnection; hasAccount: boolean }) {
   if (bridge.status === "connecting") {
-    return <StatusCard icon={<Loader2 className="size-4 animate-spin text-persimmon" />} title="连接中" text={bridge.discovering ? "正在探测本地 Agent…" : "正在检查桥接版本与能力…"} />;
+    const waiting = bridge.phase === "permission";
+    return (
+      <StatusCard
+        icon={<Loader2 className="size-4 animate-spin text-persimmon" />}
+        title={waiting ? "等待本地网络权限" : "连接中"}
+        text={waiting ? "请在浏览器弹窗中选择「允许」。授权后会自动继续探测。" : bridge.phase === "discovering" ? "正在探测本地 Agent…" : "正在检查桥接版本与能力…"}
+      />
+    );
   }
   if (bridge.status === "connected") {
     const { health } = bridge;

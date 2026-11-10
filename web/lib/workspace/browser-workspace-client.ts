@@ -44,8 +44,8 @@ export class BrowserWorkspaceClient implements WorkspaceClient {
     const bridge=new BridgeClient(url);const health=await bridge.connect(signal);signalCheck(signal);this.#bridge=bridge;
     return health;
   }
-  async discoverBridge(preferred: string, signal?: AbortSignal): Promise<{url:string;health:BridgeHealth}|null> {
-    const found = await discoverBridge(preferred, signal);
+  async discoverBridge(preferred: string, signal?: AbortSignal, onPermissionPending?: (pending: boolean) => void): Promise<{url:string;health:BridgeHealth}|null> {
+    const found = await discoverBridge(preferred, { signal, onPermissionPending });
     signalCheck(signal);
     if (!found) return null;
     this.#bridge = found.client;

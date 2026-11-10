@@ -22,9 +22,21 @@ export class BridgeClient implements AppleTransport{
     if(!['127.0.0.1','localhost','[::1]'].includes(new URL(parsed.url).hostname))throw new ClientError('INVALID_REQUEST','本地桥接只接受 loopback 地址。');
     this.baseUrl=parsed.url;
   }
-  async request<T>(path:string,body?:unknown,signal?:AbortSignal):Promise<T>{
-    if(signal?.aborted)throw new ClientError('CANCELLED');const controller=new AbortController(),aborted=()=>controller.abort();signal?.addEventListener('abort',aborted,{once:true});
-    let timedOut=false;const timeout=setTimeout(()=>{timedOut=true;controller.abort();},REQUEST_TIMEOUT_MS[path]??(body?55_000:8_000));
+  async request<T>(
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+    timeoutMs: number | null = REQUEST_TIMEOUT_MS[path] ?? (body ? 55_000 : 8_000),
+  ): Promise<T> {
+    if (signal?.aborted) throw new ClientError('CANCELLED');
+    const controller = new AbortController();
+    const aborted = () => controller.abort();
+    signal?.addEventListener('abort', aborted, { once: true });
+    let timedOut = false;
+    const timeout = timeoutMs === null ? undefined : setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
     try{
       const response=await this.fetchImpl(this.baseUrl+path,{method:body?'POST':'GET',headers:{Accept:'application/json',...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:controller.signal,cache:'no-store',credentials:'omit',redirect:'error'});
       const content=await response.text();if(content.length>12*1024*1024)throw new ClientError('UPSTREAM_UNAVAILABLE');let value;try{value=JSON.parse(content);}catch{throw new ClientError('VERSION_MISMATCH');}
@@ -38,8 +50,8 @@ export class BridgeClient implements AppleTransport{
     }catch(error){if(timedOut)throw new ClientError('TIMEOUT');if(signal?.aborted)throw new ClientError('CANCELLED');if(error instanceof ClientError)throw error;throw new ClientError('AGENT_UNAVAILABLE');}
     finally{clearTimeout(timeout);signal?.removeEventListener('abort',aborted);}
   }
-  async connect(signal?:AbortSignal):Promise<BridgeHealth>{
-    const health=await this.request<BridgeHealth>('/v1/health',undefined,signal);
+  async connect(signal?:AbortSignal,timeoutMs?:number|null):Promise<BridgeHealth>{
+    const health=await this.request<BridgeHealth>('/v1/health',undefined,signal,timeoutMs);
     if(health?.protocolVersion!==1||typeof health.agentVersion!=='string'||health.capabilities?.anisette!==true||health.capabilities?.appleRelay!==true)throw new ClientError('VERSION_MISMATCH','请更新本地桥接以支持网页登录所需的 Anisette 和 Apple 请求转发。');
     return health;
   }
