@@ -1,3 +1,4 @@
+import { rotationIntervalFor, rotationTimingAt } from './report-interval.ts';
 import type { QuerySettings, QueryWindow, WorkspaceRecord } from './types.ts';
 
 export const REPORT_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -14,28 +15,21 @@ export interface RotationEstimate extends QueryWindow {
 export interface QuerySettingsView extends QuerySettings {
   estimate: RotationEstimate | null;
   intervalMinutes: number | null;
-  intervalFromTag: boolean;
-}
-
-function timingAt(record: WorkspaceRecord, now: number) {
-  const timing = record.rotationTiming;
-  return timing && Date.parse(timing.observedAt) <= now ? timing : undefined;
+  intervalSource: 'tag' | 'report' | 'profile';
 }
 
 export function querySettingsView(record: WorkspaceRecord, now: number): QuerySettingsView {
-  const timing = timingAt(record, now);
   return {
     ...record.query,
     estimate: estimateRotation(record, now),
-    intervalMinutes: timing?.intervalMinutes ?? record.device.rotationIntervalMinutes,
-    intervalFromTag: !!timing,
+    ...rotationIntervalFor(record, now),
   };
 }
 
 export function estimateRotation(record: WorkspaceRecord, now: number): RotationEstimate | null {
   if (record.keys.kind !== 'rotating') return null;
-  const timing = timingAt(record, now);
-  const intervalMinutes = timing?.intervalMinutes ?? record.device.rotationIntervalMinutes;
+  const timing = rotationTimingAt(record, now);
+  const { intervalMinutes } = rotationIntervalFor(record, now);
   if (!intervalMinutes) return null;
 
   let anchor: RotationEstimate['anchor'] | undefined;

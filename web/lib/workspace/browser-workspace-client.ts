@@ -5,6 +5,7 @@ import { discoverBridge } from '../agent/discovery.ts';
 import { IndexedDbWorkspaceStore,type WorkspaceStore } from './store.ts';
 import { base64,generateMaterial,makeConfiguration,reportKeys,decryptReport,unbase64 } from './crypto.ts';
 import { exportEncryptedBackup,openEncryptedBackup,mergeRecords,stats,validateWorkspace } from './backup.ts';
+import { updateReportRotationInterval } from './report-interval.ts';
 import { estimateRotation, querySettingsView, REPORT_LOOKBACK_MS, type QuerySettingsView } from './report-query.ts';
 import type { QuerySettings, RotationTiming, WorkspaceRecord } from './types.ts';
 import {BrowserAppleLogin,type AppleLoginInput} from '../auth/apple-login.ts';
@@ -87,6 +88,8 @@ export class BrowserWorkspaceClient implements WorkspaceClient {
       record.device.firmwareVersion = firmwareVersion ?? record.device.firmwareVersion;
       // Applying a package replaces the active interval with the one from the profile.
       delete record.rotationTiming;
+      delete record.reportRotationInterval;
+      record.provisionedAt = new Date().toISOString();
       validateWorkspace(data);
     });
   }
@@ -96,7 +99,15 @@ export class BrowserWorkspaceClient implements WorkspaceClient {
   }
   async getQuerySettings(id: string): Promise<QuerySettingsView> {
     const record = find((await this.store.read()).records, id);
-    return querySettingsView(record, Date.now());
+    const now = Date.now();
+    if (!updateReportRotationInterval(record, now)) return querySettingsView(record, now);
+    return this.store.update(data => {
+      // Another tab may have saved a Tag reading since the snapshot above.
+      const current = find(data.records, id);
+      const asOf = Date.now();
+      updateReportRotationInterval(current, asOf);
+      return querySettingsView(current, asOf);
+    });
   }
   async updateQuerySettings(id:string,patch:Partial<QuerySettings>){await this.store.update(data=>{const record=find(data.records,id);record.query={...record.query,...patch};validateWorkspace(data);});}
   async observeRotationTiming(serial: string, timing: RotationTiming): Promise<boolean> {
@@ -109,6 +120,8 @@ export class BrowserWorkspaceClient implements WorkspaceClient {
     return this.store.update(data => {
       const record = data.records.find(item => item.device.chipSerial === normalizedSerial);
       if (!record || record.keys.kind !== 'rotating') return false;
+      const provisioned = Date.parse(record.provisionedAt ?? '');
+      if (provisioned <= now && observedAt < provisioned) return false;
       const previous = Date.parse(record.rotationTiming?.observedAt ?? '');
       if (previous >= observedAt && previous <= now) return false;
       record.rotationTiming = { ...timing, observedAt: new Date(observedAt).toISOString() };
@@ -126,6 +139,7 @@ export class BrowserWorkspaceClient implements WorkspaceClient {
       const now = Date.now();
       const from = new Date(now - REPORT_LOOKBACK_MS).toISOString();
       const to = new Date(now).toISOString();
+      if (record.query.rotationMode !== 'manual') updateReportRotationInterval(record, now);
       const estimate = record.query.rotationMode === 'manual' ? null : estimateRotation(record, now);
       const keys = await reportKeys(record.keys, estimate ?? record.query, signal);
       const ids = [...keys.keys()];
@@ -162,6 +176,7 @@ export class BrowserWorkspaceClient implements WorkspaceClient {
         }
         target.reports = [...byId.values()].sort(reportOrder).slice(0, 20000);
         target.device.latestReport = target.reports[0] ?? null;
+        updateReportRotationInterval(target, Date.now());
         return added;
       }, signal);
       operation.status='succeeded';operation.result={newReportCount:count};

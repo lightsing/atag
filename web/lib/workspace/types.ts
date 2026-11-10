@@ -7,6 +7,11 @@ export interface RotationTiming {
   observedAt: string;
   intervalMinutes: number;
 }
+export interface ReportRotationInterval {
+  intervalMinutes: number;
+  /** Time of the newest report used by the estimate. */
+  observedAt: string;
+}
 export type KeyMaterial =
   | { kind: 'fixed'; privateKey: string }
   | { kind: 'rotating'; masterPrivateKey: string; symmetricSeed: string };
@@ -16,6 +21,9 @@ export interface WorkspaceRecord {
   query: QuerySettings;
   /** Most recent reading of the running Tag, separate from its configuration package. */
   rotationTiming?: RotationTiming;
+  reportRotationInterval?: ReportRotationInterval;
+  /** A committed configuration reapplies the original rotation interval. */
+  provisionedAt?: string;
   reports: LocationReport[];
   provisioning: 'draft' | 'confirmed';
 }

@@ -5,6 +5,7 @@ import { BrowserWorkspaceClient, validateAnisetteUrl } from '../lib/workspace/br
 import { MemoryWorkspaceStore } from '../lib/workspace/store.ts';
 import { P224, concat, nextRollingKey, publicKey, base64, unbase64, decryptReport, makeConfiguration, reportKeys } from '../lib/workspace/crypto.ts';
 import { validateWorkspace } from '../lib/workspace/backup.ts';
+import { updateReportRotationInterval } from '../lib/workspace/report-interval.ts';
 import { estimateRotation, REPORT_LOOKBACK_MS, ROTATION_COUNT_MAX, ROTATION_MAX } from '../lib/workspace/report-query.ts';
 import { parseConfigPackage } from '../lib/ble/protocol.ts';
 import { BridgeClient } from '../lib/agent/bridge-client.ts';
@@ -113,45 +114,92 @@ test('automatic range uses the latest known round and keeps older in-window roun
   assert.equal(limited.limited, true);
 });
 
-test('browser saves a bound Tag runtime period separately from its provisioning package', async () => {
+test('report inference needs sustained evidence and ignores small differences and a single pause', () => {
+  const now = Date.parse('2026-11-09T12:00:00Z');
+  const at = minutes => new Date(now + minutes * MINUTE).toISOString();
+  const record = { keys: { kind: 'rotating' }, device: { rotationIntervalMinutes: 15 }, reports: [] };
+  const use = points => {
+    record.reports = points.map(([rotation, time]) => ({ observedAt: at(time), rotation }));
+  };
+  use([[100, -481], [108, -241], [108, -240], [116, 1]]);
+  assert.equal(updateReportRotationInterval(record, now), false); // Duplicate round and a future report.
+  use([[100, -257], [108, -129], [116, -1]]);
+  assert.equal(updateReportRotationInterval(record, now), false); // 16 vs. 15 minutes.
+  use([[100, -481], [108, -121], [116, -1]]);
+  assert.equal(updateReportRotationInterval(record, now), false); // Pause between rounds 100 and 108.
+  use([[100, -481], [108, -241], [116, -1]]);
+  assert.equal(updateReportRotationInterval(record, now), true);
+  assert.equal(record.reportRotationInterval.intervalMinutes, 30);
+  use([[100, -481], [108, -241], [116, -1], [124, 119], [132, 239]]);
+  assert.equal(updateReportRotationInterval(record, now + 240 * MINUTE), true);
+  assert.equal(record.reportRotationInterval.intervalMinutes, 15);
+});
+
+test('cached reports are a persistent fallback; a bound Tag reading outranks newer reports', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-09T12:00:00Z') });
   const store = new MemoryWorkspaceStore();
   const client = new BrowserWorkspaceClient(store);
   const bundle = await client.createProvisioningBundle({ name: '我的标签', mode: 'rotating', rotationIntervalMinutes: 15 });
+  const { deviceId } = bundle;
   const serial = 'D300000001000000';
-  const observedAt = new Date(Date.now() - 31 * MINUTE).toISOString();
-  const timing = { observedAt, rotation: 123, intervalMinutes: 30 };
+  const beforeProvisioning = new Date().toISOString();
+  const timing = { observedAt: beforeProvisioning, rotation: 123, intervalMinutes: 20 };
   assert.equal(await client.observeRotationTiming(serial, timing), false);
-  await client.confirmProvisioning(bundle.deviceId, serial);
+  t.mock.timers.tick(MINUTE);
+  await client.confirmProvisioning(deviceId, serial);
+  assert.equal(await client.observeRotationTiming(serial, timing), false);
+  timing.observedAt = new Date().toISOString();
+  t.mock.timers.tick(9 * 60 * MINUTE);
+  await store.update(data => {
+    data.records[0].reports = [124, 132, 140].map((rotation, i) => ({
+      id: 'report_' + rotation, deviceId, rotation,
+      observedAt: new Date(Date.now() - (511 - 240 * i) * MINUTE).toISOString(),
+      latitude: 37.77, longitude: -122.41, horizontalAccuracyMeters: 23, batteryMillivolts: 2686, source: 'findmy',
+    }));
+  });
+  const estimate = await client.getQuerySettings(deviceId);
+  assert.equal(estimate.intervalMinutes, 30);
+  assert.equal(estimate.intervalSource, 'report');
+  assert.equal((await store.read()).records[0].reportRotationInterval.intervalMinutes, 30);
+  const reportBackup = await client.exportBackup('test-password');
   assert.equal(await client.observeRotationTiming(serial, timing), true);
   assert.equal(await client.observeRotationTiming('d300000002000000', timing), false);
-  assert.equal(await client.observeRotationTiming(serial, { ...timing, intervalMinutes: 20 }), false);
+  assert.equal(await client.observeRotationTiming(serial, { ...timing, intervalMinutes: 25 }), false);
   const second = new BrowserWorkspaceClient(store);
-  const view = await second.getQuerySettings(bundle.deviceId);
-  assert.equal(view.intervalMinutes, 30);
-  assert.equal(view.intervalFromTag, true);
-  assert.equal(view.estimate.estimatedRotation, 124);
-  assert.deepEqual(await second.getProvisioningBundle(bundle.deviceId), bundle);
+  await second.restoreBackup(reportBackup, 'test-password');
+  const view = await second.getQuerySettings(deviceId);
+  assert.equal(view.intervalMinutes, 20);
+  assert.equal(view.intervalSource, 'tag');
+  assert.equal(view.estimate.estimatedRotation, 141); // Recent report anchor, measured Tag period.
+  assert.deepEqual(await second.getProvisioningBundle(deviceId), bundle);
 
-  const restored = new BrowserWorkspaceClient(new MemoryWorkspaceStore());
+  const restoredStore = new MemoryWorkspaceStore();
+  const restored = new BrowserWorkspaceClient(restoredStore);
+  await restored.restoreBackup(reportBackup, 'test-password');
+  assert.equal((await restoredStore.read()).records[0].reportRotationInterval.intervalMinutes, 30);
   await restored.restoreBackup(await second.exportBackup('test-password'), 'test-password');
-  assert.deepEqual((await restored.getQuerySettings(bundle.deviceId)).estimate.anchor, view.estimate.anchor);
-  await restored.confirmProvisioning(bundle.deviceId, serial);
-  const reprovisioned = await restored.getQuerySettings(bundle.deviceId);
+  assert.equal((await restored.getQuerySettings(deviceId)).intervalSource, 'tag');
+  await restored.confirmProvisioning(deviceId, serial);
+  await restored.restoreBackup(reportBackup, 'test-password');
+  const reprovisioned = await restored.getQuerySettings(deviceId);
   assert.equal(reprovisioned.intervalMinutes, 15);
-  assert.equal(reprovisioned.intervalFromTag, false);
+  assert.equal(reprovisioned.intervalSource, 'profile');
 });
 
-test('refresh recovers the round of a cached report, expands automatically, and honors manual mode', async t => {
+test('refresh recovers a cached round, learns the period from new reports, and honors manual mode', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-09T12:00:00Z') });
   const store = new MemoryWorkspaceStore();
   const client = new BrowserWorkspaceClient(store);
   const { deviceId } = await client.createProvisioningBundle({ name: 'rotating fixture', mode: 'rotating' });
   const { keys } = (await store.read()).records[0];
-  const rounds = [...await reportKeys(keys, { rotationStart: 2, rotationCount: 3 })];
+  const rounds = [...await reportKeys(keys, { rotationStart: 2, rotationCount: 9 })];
   const [firstId, firstKey] = rounds[0];
-  const [laterId, laterKey] = rounds[2];
+  const [middleId, middleKey] = rounds[4];
+  const [laterId, laterKey] = rounds[8];
   const now = Date.now();
-  const first = await encryptFixture(firstKey.privateKey, now - 35 * MINUTE);
-  const later = await encryptFixture(laterKey.privateKey, now - 4 * MINUTE);
+  const first = await encryptFixture(firstKey.privateKey, now - 365 * MINUTE);
+  const middle = await encryptFixture(middleKey.privateKey, now - 245 * MINUTE);
+  const later = await encryptFixture(laterKey.privateKey, now - 125 * MINUTE);
   const legacy = await decryptReport(deviceId, firstKey.privateKey, first);
   await store.update(data => {
     data.records[0].reports = [legacy];
@@ -167,7 +215,7 @@ test('refresh recovers the round of a cached report, expands automatically, and 
     if (url.endsWith('/anisette')) return Response.json({ headers: { 'x-apple-i-md': 'test', 'x-apple-i-md-m': 'test' }, clientInfo: 'test', userAgent: 'test' });
     const ids = JSON.parse(atob(JSON.parse(init.body).bodyBase64)).fetch[0].primaryIds;
     requests.push(ids);
-    const locationPayload = [[firstId, first], [laterId, later]]
+    const locationPayload = [[firstId, first], [middleId, middle], [laterId, later]]
       .filter(([id]) => ids.includes(id))
       .map(([id, payload]) => ({ id, locationInfo: [base64(payload)] }));
     const bodyBase64 = btoa(JSON.stringify({ acsnLocations: { statusCode: '200', locationPayload } }));
@@ -180,15 +228,18 @@ test('refresh recovers the round of a cached report, expands automatically, and 
   assert.deepEqual((await refresh()).result, { newReportCount: 0 });
   assert.deepEqual(requests[0], rounds.slice(0, 2).map(([id]) => id));
   assert.deepEqual((await client.getDevice(deviceId)).latestReport, { ...legacy, rotation: 2 });
-  assert.equal((await client.getQuerySettings(deviceId)).estimate.estimatedRotation, 4);
+  assert.equal((await client.getQuerySettings(deviceId)).estimate.estimatedRotation, 26);
 
-  assert.deepEqual((await refresh()).result, { newReportCount: 1 });
+  assert.deepEqual((await refresh()).result, { newReportCount: 2 });
   assert.ok(requests[1].includes(laterId));
-  assert.equal((await client.getDevice(deviceId)).latestReport.rotation, 4);
+  assert.equal((await client.getDevice(deviceId)).latestReport.rotation, 10);
+  assert.equal((await store.read()).records[0].reportRotationInterval.intervalMinutes, 30);
+  assert.deepEqual((await refresh()).result, { newReportCount: 0 });
+  assert.deepEqual(requests[2], [...(await reportKeys(keys, { rotationStart: 1, rotationCount: 16 })).keys()]);
 
   await client.updateQuerySettings(deviceId, { rotationMode: 'manual', rotationStart: 2, rotationCount: 1 });
   assert.deepEqual((await refresh()).result, { newReportCount: 0 });
-  assert.deepEqual(requests[2], [firstId]);
+  assert.deepEqual(requests[3], [firstId]);
 });
 
 test('encrypted backups roundtrip keys, reports and settings; exclude account by default',async()=>{

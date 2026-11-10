@@ -37,6 +37,11 @@ const record = z.object({device, keys,
     observedAt:time,
     intervalMinutes:z.number().int().min(1).max(0xffffffff),
   }).strict().optional(),
+  reportRotationInterval:z.object({
+    intervalMinutes:z.number().int().min(1).max(0xffffffff),
+    observedAt:time,
+  }).strict().optional(),
+  provisionedAt:time.optional(),
   reports:z.array(report).max(20000),provisioning:z.enum(['draft','confirmed']),
 }).strict();
 export const accountSchema = z.object({dsid:z.string().min(1).max(256),searchPartyToken:z.string().min(1).max(8192),uid:z.string().min(1).max(256),deviceId:z.string().min(1).max(256),accountLabel:z.string().max(200).nullable()}).strict();
@@ -112,6 +117,13 @@ export function mergeRecords(current:WorkspaceData,incoming:WorkspaceData) {
       const timing = entry.rotationTiming;
       if (timing && (!existing.rotationTiming || timing.observedAt > existing.rotationTiming.observedAt)) {
         existing.rotationTiming = timing;
+      }
+      const estimate = entry.reportRotationInterval;
+      if (estimate && (!existing.reportRotationInterval || estimate.observedAt > existing.reportRotationInterval.observedAt)) {
+        existing.reportRotationInterval = estimate;
+      }
+      if (entry.provisionedAt && (!existing.provisionedAt || entry.provisionedAt > existing.provisionedAt)) {
+        existing.provisionedAt = entry.provisionedAt;
       }
     }else next.records.push(structuredClone(entry));
   }

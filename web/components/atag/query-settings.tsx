@@ -115,7 +115,8 @@ export function QuerySettingsSection({
             </label>
             {saved.intervalMinutes !== null && (
               <p className="text-[12px] text-ink-soft">
-                轮换周期：{saved.intervalMinutes} 分钟（{saved.intervalFromTag ? "Tag 最近确认" : "建档设置"}）
+                轮换周期：{saved.intervalSource === "report" && "约 "}{saved.intervalMinutes} 分钟（
+                {saved.intervalSource === "tag" ? "Tag 最近确认" : saved.intervalSource === "report" ? "报告估算" : "建档设置"}）
               </p>
             )}
             {mode === "auto" ? (
